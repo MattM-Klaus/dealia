@@ -73,10 +73,10 @@ export default function Pipeline() {
   const [importMsg, setImportMsg]     = useState<string | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [importing, setImporting]     = useState(false);
-  const [prevTiles, setPrevTiles]     = useState<{ cw: number; commit: number; ml: number; bestCase: number; remaining: number } | null>(null);
+  const [prevTiles, setPrevTiles]     = useState<{ cw: number; commit: number; ml: number; bestCase: number; remaining: number; totalPipe: number } | null>(null);
 
   // Ref always holds the latest tile values so handleImport can snapshot them
-  const tileRef = useRef({ cw: 0, commit: 0, ml: 0, bestCase: 0, remaining: 0 });
+  const tileRef = useRef({ cw: 0, commit: 0, ml: 0, bestCase: 0, remaining: 0, totalPipe: 0 });
 
   // Filters
   const [searchQuery, setSearchQuery]     = useState('');
@@ -130,6 +130,42 @@ export default function Pipeline() {
     }
   }
 
+  async function handleTableauSync() {
+    // Snapshot current tile values before the reload
+    setPrevTiles({ ...tileRef.current });
+
+    setImportMsg(null);
+    setImportError(null);
+    setImporting(true);
+
+    try {
+      const response: { success: boolean; result?: ForecastImportResult; error?: string } = await window.api.syncFromTableau();
+
+      if (!response.success || !response.result) {
+        setImportError(response.error || 'Tableau sync failed');
+        setTimeout(() => setImportError(null), 15000);
+        return;
+      }
+
+      await load();
+
+      const result = response.result;
+      const parts = [`Synced from Tableau: ${result.inserted} new, ${result.updated} updated`];
+      if (result.changes_detected > 0) parts.push(`${result.changes_detected} change${result.changes_detected !== 1 ? 's' : ''} detected — check Analytics`);
+      if (result.synced_renewals > 0) parts.push(`${result.synced_renewals} renewal${result.synced_renewals !== 1 ? 's' : ''} auto-set to Deal Live`);
+      if (result.failed > 0) parts.push(`${result.failed} failed`);
+      if (result.errors.length > 0) parts.push(`First error: ${result.errors[0]}`);
+      setImportMsg(parts.join(' · '));
+      setTimeout(() => setImportMsg(null), 15000);
+    } catch (err) {
+      console.error('[Pipeline] Tableau sync error:', err);
+      setImportError(`Tableau sync failed: ${(err as Error).message ?? String(err)}`);
+      setTimeout(() => setImportError(null), 15000);
+    } finally {
+      setImporting(false);
+    }
+  }
+
   // Derived filter options
   const allManagers = [...new Set(opps.map((o) => o.manager_name).filter(Boolean))].sort();
   const allQuarters = [...new Set(opps.map((o) => toCloseQuarter(o.close_date)).filter(Boolean))].sort();
@@ -169,6 +205,7 @@ export default function Pipeline() {
   const mlArr        = filteredOpps.filter((o) => o.ais_forecast === 'Most Likely').reduce((s, o) => s + (o.ais_arr ?? o.product_arr_usd), 0);
   const bestCaseArr  = filteredOpps.filter((o) => o.ais_forecast === 'Best Case').reduce((s, o) => s + (o.ais_arr ?? o.product_arr_usd), 0);
   const remainingArr = filteredOpps.filter((o) => o.ais_forecast === 'Remaining Pipe').reduce((s, o) => s + (o.ais_arr ?? o.product_arr_usd), 0);
+  const totalPipe    = filteredOpps.reduce((s, o) => s + (o.ais_arr ?? o.product_arr_usd), 0);
   const totalCW      = closedWon.filter((o) => {
     if (quarterFilter.size > 0 && !quarterFilter.has(toCloseQuarter(o.close_date))) return false;
     if (managerFilter.size > 0 && !managerFilter.has(o.manager_name)) return false;
@@ -179,7 +216,7 @@ export default function Pipeline() {
   const dealBacked   = totalCW + commitArr + mlArr;
 
   // Keep ref in sync so handleImport can snapshot before reload
-  tileRef.current = { cw: totalCW, commit: commitArr, ml: mlArr, bestCase: bestCaseArr, remaining: remainingArr };
+  tileRef.current = { cw: totalCW, commit: commitArr, ml: mlArr, bestCase: bestCaseArr, remaining: remainingArr, totalPipe };
 
   // Last upload timestamp from most recent updated_at across all opps
   const lastUpdated = opps.length > 0
@@ -198,12 +235,22 @@ export default function Pipeline() {
             {lastUpdated ? `Open pipeline — last updated ${fmtDateTime(lastUpdated)}` : 'Open pipeline — no data yet'}
           </p>
         </div>
-        <button
-          onClick={handleImport}
-          className="px-3 py-2 text-sm rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-600"
-        >
-          Upload Pipeline CSV
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={handleTableauSync}
+            disabled={importing}
+            className="px-3 py-2 text-sm rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Sync from Tableau
+          </button>
+          <button
+            onClick={handleImport}
+            disabled={importing}
+            className="px-3 py-2 text-sm rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Upload CSV
+          </button>
+        </div>
       </div>
 
       {importing && (
@@ -226,12 +273,13 @@ export default function Pipeline() {
       )}
 
       {/* Stats */}
-      <div className="grid grid-cols-5 gap-3 mb-4">
+      <div className="grid grid-cols-6 gap-3 mb-4">
         <StatCard label="Deal Backed"        value={fmtCurrency(dealBacked)}   sub="CW + Commit + Most Likely" color="blue"  delta={prevTiles ? dealBacked - (prevTiles.cw + prevTiles.commit + prevTiles.ml) : undefined} />
         <StatCard label="AIS Commit"         value={fmtCurrency(commitArr)}    color="green"              delta={prevTiles ? commitArr    - prevTiles.commit    : undefined} />
         <StatCard label="AIS Most Likely"    value={fmtCurrency(mlArr)}        color="yellow"             delta={prevTiles ? mlArr        - prevTiles.ml        : undefined} />
         <StatCard label="AIS Best Case"      value={fmtCurrency(bestCaseArr)}  color="orange"             delta={prevTiles ? bestCaseArr  - prevTiles.bestCase  : undefined} />
         <StatCard label="AIS Remaining Pipe" value={fmtCurrency(remainingArr)} color="gray"               delta={prevTiles ? remainingArr - prevTiles.remaining : undefined} />
+        <StatCard label="Total Pipeline"     value={fmtCurrency(totalPipe)}    color="blue"               delta={prevTiles ? totalPipe    - prevTiles.totalPipe : undefined} />
       </div>
 
       {/* Search */}

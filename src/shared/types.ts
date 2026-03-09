@@ -40,10 +40,26 @@ export interface AccountFormData {
   notes: string;
 }
 
+export interface TableauFilters {
+  product_group: string[];
+  segments: string[];
+  close_quarter: string[];
+  commissionable: string[];
+  ai_ae: string[];
+  svp_leader: string[];
+  svp_minus_1: string[];
+  vp_team: string[];
+}
+
 export interface AppSettings {
   slack_webhook_url: string;
   notification_enabled: boolean;
   anthropic_api_key: string;
+  tableau_pat_name: string;
+  tableau_pat_secret: string;
+  tableau_site: string;
+  tableau_view_id: string;
+  tableau_filters: TableauFilters;
 }
 
 export interface CsvImportResult {
@@ -179,10 +195,36 @@ export interface OppPushStats {
   current_arr: number;
 }
 
+export interface ForecastDifference {
+  crm_opportunity_id: string;
+  account_name: string;
+  product: string;
+  ai_ae: string;
+  manager_name: string;
+  diff_type: 'category' | 'arr' | 'date';
+  vp_value: string;
+  ais_value: string;
+  arr_delta?: number;
+  days_delta?: number;
+}
+
 export interface AnalyticsData {
   changes: ForecastChange[];
   lastImportAt: string | null;
   multiPushOpps: OppPushStats[];
   totalPipelineNow: number;
   totalPipelinePrev: number;
+  forecastDifferences: ForecastDifference[];
+}
+
+export interface ImportHistoryEntry {
+  id: number;
+  imported_at: string;
+  source_type: string;
+  backup_filename: string;
+  row_count: number;
+  inserted_count: number;
+  updated_count: number;
+  total_pipeline: number;
+  created_at: string;
 }

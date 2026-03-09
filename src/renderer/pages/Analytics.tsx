@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import type { AlertReason, AnalyticsData, ChangeType, ClosedWonOpp, ForecastChange, ForecastOpp, OppPushStats, Quota } from '../../shared/types';
+import type { AlertReason, AnalyticsData, ChangeType, ClosedWonOpp, ForecastChange, ForecastDifference, ForecastOpp, OppPushStats, Quota } from '../../shared/types';
 import { mapForecast, toCloseQuarter } from '../../shared/utils';
 
 // ── Formatters ─────────────────────────────────────────────────
@@ -181,6 +181,7 @@ export default function Analytics() {
             closedWon={closedWon}
             quotas={quotas}
             multiPushOpps={data?.multiPushOpps ?? []}
+            forecastDifferences={data?.forecastDifferences ?? []}
             quarterFilter={quarterFilter}
             setQuarterFilter={setQuarterFilter}
             managerFilter={managerFilterOv}
@@ -220,6 +221,7 @@ export default function Analytics() {
             opps={opps}
             closedWon={closedWon}
             quotas={quotas}
+            forecastDifferences={data?.forecastDifferences ?? []}
           />
       }
     </div>
@@ -231,7 +233,7 @@ export default function Analytics() {
 // ══════════════════════════════════════════════════════════════
 
 function OverviewTab({
-  opps, closedWon, quotas, multiPushOpps,
+  opps, closedWon, quotas, multiPushOpps, forecastDifferences,
   quarterFilter, setQuarterFilter,
   managerFilter, setManagerFilter,
   aiAeFilter, setAiAeFilter,
@@ -242,6 +244,7 @@ function OverviewTab({
   closedWon: ClosedWonOpp[];
   quotas: Quota[];
   multiPushOpps: OppPushStats[];
+  forecastDifferences: ForecastDifference[];
   quarterFilter: Set<string>;
   setQuarterFilter: (v: Set<string>) => void;
   managerFilter: Set<string>;
@@ -1049,6 +1052,142 @@ function EmptyState({ text }: { text: string }) {
   return <p className="text-xs text-gray-400 italic py-2">{text}</p>;
 }
 
+function ForecastDifferencesSection({ differences }: { differences: ForecastDifference[] }) {
+  const [expanded, setExpanded] = useState(false);
+
+  // Safety check
+  if (!differences || !Array.isArray(differences)) {
+    return null;
+  }
+
+  // Calculate summary stats
+  const categoryDiffs = differences.filter(d => d?.diff_type === 'category');
+  const arrDiffs = differences.filter(d => d?.diff_type === 'arr');
+  const dateDiffs = differences.filter(d => d?.diff_type === 'date');
+
+  // Category breakdown
+  const moreConservative = categoryDiffs.filter(d => {
+    const vp = d.vp_value;
+    const ais = d.ais_value;
+    // More conservative means moving from better to worse: Commit→ML, ML→BestCase, BestCase→Remaining
+    if (vp === 'Commit' && (ais === 'Most Likely' || ais === 'Best Case' || ais === 'Remaining Pipe')) return true;
+    if (vp === 'Most Likely' && (ais === 'Best Case' || ais === 'Remaining Pipe')) return true;
+    if (vp === 'Best Case' && ais === 'Remaining Pipe') return true;
+    return false;
+  }).length;
+  const moreOptimistic = categoryDiffs.length - moreConservative;
+
+  // ARR stats
+  const totalArrDelta = arrDiffs.reduce((sum, d) => sum + (d.arr_delta || 0), 0);
+  const avgArrChange = arrDiffs.length > 0 ? Math.round(totalArrDelta / arrDiffs.length) : 0;
+
+  // Date stats
+  const pushedOut = dateDiffs.filter(d => (d.days_delta || 0) > 0).length;
+  const pulledIn = dateDiffs.filter(d => (d.days_delta || 0) < 0).length;
+  const avgDaysDelta = dateDiffs.length > 0 ? Math.round(dateDiffs.reduce((sum, d) => sum + (d.days_delta || 0), 0) / dateDiffs.length) : 0;
+
+  const oppSfdcUrl = (oppId: string) => `https://zendesk.lightning.force.com/lightning/r/Opportunity/${oppId}/view`;
+
+  return (
+    <Section title="Forecast Differences" emoji="🎯">
+      <div className="grid grid-cols-3 gap-3 mb-4">
+        <BigCard
+          label="Category Overrides"
+          value={String(categoryDiffs.length)}
+          sub={categoryDiffs.length > 0 ? `↓ ${moreConservative} conservative, ↑ ${moreOptimistic} optimistic` : 'No overrides'}
+          color="blue"
+        />
+        <BigCard
+          label="ARR Adjustments"
+          value={String(arrDiffs.length)}
+          sub={arrDiffs.length > 0 ? `Avg: ${fmtCurrency(avgArrChange)} | Total: ${fmtCurrency(totalArrDelta)}` : 'No adjustments'}
+          color="green"
+        />
+        <BigCard
+          label="Date Changes"
+          value={String(dateDiffs.length)}
+          sub={dateDiffs.length > 0 ? `⏰ ${pushedOut} pushed, ⏩ ${pulledIn} pulled in | Avg: ${avgDaysDelta > 0 ? '+' : ''}${avgDaysDelta}d` : 'No changes'}
+          color="orange"
+        />
+      </div>
+
+      {differences.length === 0 ? (
+        <EmptyState text="No forecast differences — AIS team aligned with VP forecasts." />
+      ) : (
+        <>
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="text-sm text-blue-600 hover:text-blue-800 underline mb-3"
+          >
+            {expanded ? '▼ Hide details' : `▶ Show ${differences.length} difference${differences.length === 1 ? '' : 's'}`}
+          </button>
+
+          {expanded && (
+            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-100 bg-gray-50">
+                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500">Account</th>
+                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500">Product</th>
+                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500">AI AE</th>
+                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500">Type</th>
+                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500">VP → AIS</th>
+                    <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500">SFDC</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {differences.map((diff, idx) => (
+                    <tr key={idx} className="hover:bg-gray-50">
+                      <td className="px-4 py-2.5 text-gray-900 font-medium">{diff.account_name}</td>
+                      <td className="px-4 py-2.5">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${productClass(diff.product)}`}>
+                          {diff.product}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5 text-gray-600 text-xs">{diff.ai_ae || '—'}</td>
+                      <td className="px-4 py-2.5">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                          diff.diff_type === 'category' ? 'bg-blue-100 text-blue-800' :
+                          diff.diff_type === 'arr' ? 'bg-green-100 text-green-800' :
+                          'bg-orange-100 text-orange-800'
+                        }`}>
+                          {diff.diff_type === 'category' ? 'Category' : diff.diff_type === 'arr' ? 'ARR' : 'Date'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5 text-gray-600 text-xs">
+                        {diff.diff_type === 'arr' && diff.arr_delta != null ? (
+                          <span className={diff.arr_delta > 0 ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
+                            {diff.vp_value} → {diff.ais_value} ({diff.arr_delta > 0 ? '+' : ''}{fmtCurrencyAbs(diff.arr_delta)})
+                          </span>
+                        ) : diff.diff_type === 'date' && diff.days_delta != null ? (
+                          <span className={diff.days_delta > 0 ? 'text-orange-600' : 'text-blue-600'}>
+                            {fmtDate(diff.vp_value)} → {fmtDate(diff.ais_value)} ({diff.days_delta > 0 ? '+' : ''}{diff.days_delta}d)
+                          </span>
+                        ) : (
+                          <span>{diff.vp_value} → {diff.ais_value}</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5 text-center">
+                        <a
+                          href={oppSfdcUrl(diff.crm_opportunity_id)}
+                          onClick={(e) => { e.preventDefault(); window.api.openExternal(oppSfdcUrl(diff.crm_opportunity_id)); }}
+                          className="text-blue-600 hover:text-blue-800 text-xs underline"
+                        >
+                          View
+                        </a>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </Section>
+  );
+}
+
 // ══════════════════════════════════════════════════════════════
 // CHANGES TAB
 // ══════════════════════════════════════════════════════════════
@@ -1465,11 +1604,13 @@ function ExecutiveSummaryTab({
   opps,
   closedWon,
   quotas,
+  forecastDifferences,
 }: {
   changes: ForecastChange[];
   opps: ForecastOpp[];
   closedWon: ClosedWonOpp[];
   quotas: Quota[];
+  forecastDifferences: ForecastDifference[];
 }) {
   const [datePreset, setDatePreset] = useState<'last7' | 'last14' | 'this_month' | 'this_qtr' | 'custom'>('this_qtr');
   const [customFrom, setCustomFrom] = useState('');
@@ -1875,6 +2016,9 @@ function ExecutiveSummaryTab({
 
         {filteredCW.length === 0 && <EmptyState text={`No closed won deals in the selected range (${presetLabel}).`} />}
       </Section>
+
+      {/* ── Section 2.5: Forecast Differences ── */}
+      <ForecastDifferencesSection differences={forecastDifferences} />
 
       {/* ── Section 3: What's Changed ── */}
       <Section title="What's Changed" emoji="🔄">

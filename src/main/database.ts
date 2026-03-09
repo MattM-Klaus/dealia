@@ -1,8 +1,8 @@
 import Database from 'better-sqlite3';
 import path from 'node:path';
 import { app } from 'electron';
-import type { Account, AccountFormData, AppSettings, AisForecast, AnalyticsData, ContactStatus, ForecastChange, ForecastOpp, ClosedWonOpp, NotificationLogEntry, OppPushStats, Product, Quota } from '../shared/types';
-import { normalizeProduct } from '../shared/utils';
+import type { Account, AccountFormData, AppSettings, AisForecast, AnalyticsData, ContactStatus, ForecastChange, ForecastOpp, ClosedWonOpp, NotificationLogEntry, OppPushStats, Product, Quota, TableauFilters, ImportHistoryEntry, ForecastDifference } from '../shared/types';
+import { normalizeProduct, mapForecast } from '../shared/utils';
 
 let db: Database.Database;
 
@@ -189,6 +189,21 @@ function runMigrations(): void {
     );
   `);
 
+  // import_history: tracks CSV uploads and backups
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS import_history (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      imported_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+      source_type      TEXT    NOT NULL DEFAULT 'csv',
+      backup_filename  TEXT    NOT NULL,
+      row_count        INTEGER NOT NULL DEFAULT 0,
+      inserted_count   INTEGER NOT NULL DEFAULT 0,
+      updated_count    INTEGER NOT NULL DEFAULT 0,
+      total_pipeline   REAL    NOT NULL DEFAULT 0,
+      created_at       TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
   // Safe migrations for existing databases that may not have new columns yet
   for (const col of [
     `ALTER TABLE accounts ADD COLUMN target_products TEXT NOT NULL DEFAULT '[]'`,
@@ -336,10 +351,17 @@ export function setSetting(key: string, value: string): void {
 }
 
 export function getSettings(): AppSettings {
+  const tableauFiltersJson = getSetting('tableau_filters') || '{"product_group":[],"segments":[],"close_quarter":[],"commissionable":[],"ai_ae":[],"svp_leader":[],"svp_minus_1":[],"vp_team":[]}';
+
   return {
     slack_webhook_url: getSetting('slack_webhook_url') || '',
     notification_enabled: getSetting('notification_enabled') !== 'false',
     anthropic_api_key: getSetting('anthropic_api_key') || '',
+    tableau_pat_name: getSetting('tableau_pat_name') || '',
+    tableau_pat_secret: getSetting('tableau_pat_secret') || '',
+    tableau_site: getSetting('tableau_site') || 'zendesktableau',
+    tableau_view_id: getSetting('tableau_view_id') || '',
+    tableau_filters: JSON.parse(tableauFiltersJson),
   };
 }
 
@@ -352,6 +374,21 @@ export function saveSettings(settings: Partial<AppSettings>): void {
   }
   if (settings.anthropic_api_key !== undefined) {
     setSetting('anthropic_api_key', settings.anthropic_api_key);
+  }
+  if (settings.tableau_pat_name !== undefined) {
+    setSetting('tableau_pat_name', settings.tableau_pat_name);
+  }
+  if (settings.tableau_pat_secret !== undefined) {
+    setSetting('tableau_pat_secret', settings.tableau_pat_secret);
+  }
+  if (settings.tableau_site !== undefined) {
+    setSetting('tableau_site', settings.tableau_site);
+  }
+  if (settings.tableau_view_id !== undefined) {
+    setSetting('tableau_view_id', settings.tableau_view_id);
+  }
+  if (settings.tableau_filters !== undefined) {
+    setSetting('tableau_filters', JSON.stringify(settings.tableau_filters));
   }
 }
 
@@ -670,13 +707,112 @@ export function getAnalyticsData(): AnalyticsData {
     totalPipelinePrev = pipelineNow.total - delta;
   }
 
+  // Forecast differences - where AIS team intentionally differed from VP forecast
+  const forecastDifferences = getForecastDifferences();
+
   return {
     changes,
     lastImportAt: lastRow?.ts ?? null,
     multiPushOpps,
     totalPipelineNow: pipelineNow.total,
     totalPipelinePrev,
+    forecastDifferences,
   };
+}
+
+function getForecastDifferences(): ForecastDifference[] {
+  try {
+    // Get opps where manual overrides exist
+    const opps = db.prepare(`
+      SELECT
+        crm_opportunity_id, account_name, product, ai_ae, manager_name,
+        vp_deal_forecast, ais_forecast, ais_forecast_manual,
+        product_arr_usd, ais_arr, ais_arr_manual,
+        close_date, ais_close_date, ais_close_date_manual
+      FROM forecast_opps
+      WHERE ais_forecast_manual = 1 OR ais_arr_manual = 1 OR ais_close_date_manual = 1
+    `).all() as Array<{
+    crm_opportunity_id: string;
+    account_name: string;
+    product: string;
+    ai_ae: string;
+    manager_name: string;
+    vp_deal_forecast: string;
+    ais_forecast: string | null;
+    ais_forecast_manual: number;
+    product_arr_usd: number;
+    ais_arr: number | null;
+    ais_arr_manual: number;
+    close_date: string;
+    ais_close_date: string | null;
+    ais_close_date_manual: number;
+  }>;
+
+  const differences: ForecastDifference[] = [];
+
+  for (const opp of opps) {
+    // Category difference
+    if (opp.ais_forecast_manual === 1 && opp.ais_forecast) {
+      const vpMapped = mapForecast(opp.vp_deal_forecast);
+      if (vpMapped !== opp.ais_forecast) {
+        differences.push({
+          crm_opportunity_id: opp.crm_opportunity_id,
+          account_name: opp.account_name,
+          product: opp.product,
+          ai_ae: opp.ai_ae,
+          manager_name: opp.manager_name,
+          diff_type: 'category',
+          vp_value: vpMapped || opp.vp_deal_forecast || '—',
+          ais_value: opp.ais_forecast,
+        });
+      }
+    }
+
+    // ARR difference
+    if (opp.ais_arr_manual === 1 && opp.ais_arr != null) {
+      const delta = opp.ais_arr - opp.product_arr_usd;
+      if (Math.abs(delta) >= 1000) { // Only show if difference is >= $1K
+        differences.push({
+          crm_opportunity_id: opp.crm_opportunity_id,
+          account_name: opp.account_name,
+          product: opp.product,
+          ai_ae: opp.ai_ae,
+          manager_name: opp.manager_name,
+          diff_type: 'arr',
+          vp_value: `$${opp.product_arr_usd.toLocaleString()}`,
+          ais_value: `$${opp.ais_arr.toLocaleString()}`,
+          arr_delta: delta,
+        });
+      }
+    }
+
+    // Date difference
+    if (opp.ais_close_date_manual === 1 && opp.ais_close_date) {
+      if (opp.close_date !== opp.ais_close_date) {
+        const vpDate = new Date(opp.close_date);
+        const aisDate = new Date(opp.ais_close_date);
+        const daysDelta = Math.round((aisDate.getTime() - vpDate.getTime()) / (1000 * 60 * 60 * 24));
+
+        differences.push({
+          crm_opportunity_id: opp.crm_opportunity_id,
+          account_name: opp.account_name,
+          product: opp.product,
+          ai_ae: opp.ai_ae,
+          manager_name: opp.manager_name,
+          diff_type: 'date',
+          vp_value: opp.close_date,
+          ais_value: opp.ais_close_date,
+          days_delta: daysDelta,
+        });
+      }
+    }
+  }
+
+    return differences;
+  } catch (err) {
+    console.error('[database] Error getting forecast differences:', err);
+    return [];
+  }
 }
 
 // ── Closed Won Opps ────────────────────────────────────────────
@@ -797,4 +933,33 @@ export function syncForecastToRenewals(
   }
 
   return synced;
+}
+
+// ── Import History ─────────────────────────────────────────────
+
+export function logImport(data: {
+  source_type: string;
+  backup_filename: string;
+  row_count: number;
+  inserted_count: number;
+  updated_count: number;
+  total_pipeline: number;
+}): void {
+  db.prepare(`
+    INSERT INTO import_history (source_type, backup_filename, row_count, inserted_count, updated_count, total_pipeline)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    data.source_type,
+    data.backup_filename,
+    data.row_count,
+    data.inserted_count,
+    data.updated_count,
+    data.total_pipeline,
+  );
+}
+
+export function getImportHistory(limit = 20): ImportHistoryEntry[] {
+  return db
+    .prepare('SELECT * FROM import_history ORDER BY imported_at DESC LIMIT ?')
+    .all(limit) as ImportHistoryEntry[];
 }

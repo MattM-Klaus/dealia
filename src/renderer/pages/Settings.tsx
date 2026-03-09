@@ -35,6 +35,20 @@ export default function Settings() {
     slack_webhook_url: '',
     notification_enabled: true,
     anthropic_api_key: '',
+    tableau_pat_name: '',
+    tableau_pat_secret: '',
+    tableau_site: 'zendesktableau',
+    tableau_view_id: '',
+    tableau_filters: {
+      product_group: [],
+      segments: [],
+      close_quarter: [],
+      commissionable: [],
+      ai_ae: [],
+      svp_leader: [],
+      svp_minus_1: [],
+      vp_team: [],
+    },
   });
   const [saved, setSaved] = useState(false);
   const [testingMac, setTestingMac] = useState(false);
@@ -42,6 +56,8 @@ export default function Settings() {
   const [slackResult, setSlackResult] = useState<{ ok: boolean; error?: string } | null>(null);
   const [running, setRunning] = useState(false);
   const [checkResult, setCheckResult] = useState<{ sent: number } | null>(null);
+  const [testingTableau, setTestingTableau] = useState(false);
+  const [tableauTestResult, setTableauTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
   // Quotas
   const [quotas, setQuotas]           = useState<Quota[]>([]);
@@ -129,6 +145,30 @@ export default function Settings() {
     const result = await window.api.runRenewalCheck();
     setCheckResult(result);
     setRunning(false);
+  }
+
+  async function handleTestTableau() {
+    // Save settings first
+    await window.api.saveSettings(settings);
+
+    setTestingTableau(true);
+    setTableauTestResult(null);
+
+    const result = await window.api.syncFromTableau();
+
+    if (result.success && result.result) {
+      setTableauTestResult({
+        success: true,
+        message: `✓ Connection successful! Found ${result.result.inserted + result.result.updated} opportunities.`
+      });
+    } else {
+      setTableauTestResult({
+        success: false,
+        message: result.error || 'Connection failed. Check terminal console for details.'
+      });
+    }
+
+    setTestingTableau(false);
   }
 
   return (
@@ -262,6 +302,185 @@ export default function Settings() {
           </div>
           {settings.anthropic_api_key && (
             <p className="text-xs text-green-600 mt-1">✓ API key configured</p>
+          )}
+        </div>
+      </div>
+
+      {/* Tableau Cloud Integration */}
+      <div className="bg-white rounded-xl border border-gray-100 px-6 py-5 mb-4">
+        <h3 className="text-sm font-semibold text-gray-700 mb-1">Tableau Cloud Integration</h3>
+        <p className="text-xs text-gray-400 mb-4">Automatically sync pipeline data from Tableau to eliminate manual CSV downloads.</p>
+
+        <div className="space-y-4">
+          {/* PAT Credentials */}
+          <div>
+            <label className="text-xs font-medium text-gray-500 block mb-1">Personal Access Token Name</label>
+            <input
+              type="text"
+              value={settings.tableau_pat_name}
+              onChange={(e) => setSettings((s) => ({ ...s, tableau_pat_name: e.target.value }))}
+              placeholder="e.g. Dealia Sync"
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-green-400"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-gray-500 block mb-1">Personal Access Token Secret</label>
+            <input
+              type="password"
+              value={settings.tableau_pat_secret}
+              onChange={(e) => setSettings((s) => ({ ...s, tableau_pat_secret: e.target.value }))}
+              placeholder="Enter your PAT secret"
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-green-400 font-mono"
+            />
+            <p className="text-xs text-gray-400 mt-1">Create a PAT in Tableau Cloud: Profile → Settings → Personal Access Tokens</p>
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-gray-500 block mb-1">Tableau Site Name</label>
+            <input
+              type="text"
+              value={settings.tableau_site}
+              onChange={(e) => setSettings((s) => ({ ...s, tableau_site: e.target.value }))}
+              placeholder="e.g. zendesktableau"
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-green-400"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-gray-500 block mb-1">View ID (Base View Only)</label>
+            <input
+              type="text"
+              value={settings.tableau_view_id}
+              onChange={(e) => setSettings((s) => ({ ...s, tableau_view_id: e.target.value }))}
+              placeholder="WorkbookName/ViewName"
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-green-400 font-mono"
+            />
+            <p className="text-xs text-gray-400 mt-1">
+              <strong>Important:</strong> Must use base view path (e.g., "GTMIProductIntelligence_17425742277560/OpenPipelineDash")<br />
+              Custom views (UUIDs) don't support CSV export. Use filters below to replicate your custom view.
+            </p>
+          </div>
+
+          {/* Filter Configuration */}
+          <div className="border-t border-gray-100 pt-4">
+            <h4 className="text-xs font-semibold text-gray-600 mb-3">Default Filters (Required)</h4>
+            <p className="text-xs text-gray-400 mb-3">
+              Configure the same filters you use in your custom Tableau view. Enter values as comma-separated lists.<br />
+              <strong>Tip:</strong> In Tableau, note which filters you have applied, then enter those exact values below.
+            </p>
+
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div>
+                <label className="font-medium text-gray-500 block mb-1">Product Group</label>
+                <input
+                  type="text"
+                  value={settings.tableau_filters.product_group.join(', ')}
+                  onChange={(e) => setSettings((s) => ({ ...s, tableau_filters: { ...s.tableau_filters, product_group: e.target.value.split(',').map(v => v.trim()).filter(Boolean) }}))}
+                  placeholder="e.g. AI Group (New)"
+                  className="w-full border border-gray-200 rounded px-2 py-1.5 outline-none focus:ring-2 focus:ring-green-400"
+                />
+              </div>
+
+              <div>
+                <label className="font-medium text-gray-500 block mb-1">Segments</label>
+                <input
+                  type="text"
+                  value={settings.tableau_filters.segments.join(', ')}
+                  onChange={(e) => setSettings((s) => ({ ...s, tableau_filters: { ...s.tableau_filters, segments: e.target.value.split(',').map(v => v.trim()).filter(Boolean) }}))}
+                  placeholder="e.g. Commercial, Enterprise"
+                  className="w-full border border-gray-200 rounded px-2 py-1.5 outline-none focus:ring-2 focus:ring-green-400"
+                />
+              </div>
+
+              <div>
+                <label className="font-medium text-gray-500 block mb-1">Close Quarter</label>
+                <input
+                  type="text"
+                  value={settings.tableau_filters.close_quarter.join(', ')}
+                  onChange={(e) => setSettings((s) => ({ ...s, tableau_filters: { ...s.tableau_filters, close_quarter: e.target.value.split(',').map(v => v.trim()).filter(Boolean) }}))}
+                  placeholder="e.g. FY2027Q1, FY2027Q2"
+                  className="w-full border border-gray-200 rounded px-2 py-1.5 outline-none focus:ring-2 focus:ring-green-400"
+                />
+              </div>
+
+              <div>
+                <label className="font-medium text-gray-500 block mb-1">Commissionable</label>
+                <input
+                  type="text"
+                  value={settings.tableau_filters.commissionable.join(', ')}
+                  onChange={(e) => setSettings((s) => ({ ...s, tableau_filters: { ...s.tableau_filters, commissionable: e.target.value.split(',').map(v => v.trim()).filter(Boolean) }}))}
+                  placeholder="e.g. True"
+                  className="w-full border border-gray-200 rounded px-2 py-1.5 outline-none focus:ring-2 focus:ring-green-400"
+                />
+              </div>
+
+              <div>
+                <label className="font-medium text-gray-500 block mb-1">AI AE</label>
+                <input
+                  type="text"
+                  value={settings.tableau_filters.ai_ae.join(', ')}
+                  onChange={(e) => setSettings((s) => ({ ...s, tableau_filters: { ...s.tableau_filters, ai_ae: e.target.value.split(',').map(v => v.trim()).filter(Boolean) }}))}
+                  placeholder="e.g. Bruno Prado, Emiliano Rodríguez"
+                  className="w-full border border-gray-200 rounded px-2 py-1.5 outline-none focus:ring-2 focus:ring-green-400"
+                />
+              </div>
+
+              <div>
+                <label className="font-medium text-gray-500 block mb-1">SVP Leader</label>
+                <input
+                  type="text"
+                  value={settings.tableau_filters.svp_leader.join(', ')}
+                  onChange={(e) => setSettings((s) => ({ ...s, tableau_filters: { ...s.tableau_filters, svp_leader: e.target.value.split(',').map(v => v.trim()).filter(Boolean) }}))}
+                  placeholder="e.g. Eduardo Lugo, Jim Priestley"
+                  className="w-full border border-gray-200 rounded px-2 py-1.5 outline-none focus:ring-2 focus:ring-green-400"
+                />
+              </div>
+
+              <div>
+                <label className="font-medium text-gray-500 block mb-1">SVP Minus 1</label>
+                <input
+                  type="text"
+                  value={settings.tableau_filters.svp_minus_1.join(', ')}
+                  onChange={(e) => setSettings((s) => ({ ...s, tableau_filters: { ...s.tableau_filters, svp_minus_1: e.target.value.split(',').map(v => v.trim()).filter(Boolean) }}))}
+                  placeholder="e.g. Bobby Durbin, Gilberto Garza"
+                  className="w-full border border-gray-200 rounded px-2 py-1.5 outline-none focus:ring-2 focus:ring-green-400"
+                />
+              </div>
+
+              <div>
+                <label className="font-medium text-gray-500 block mb-1">VP Team</label>
+                <input
+                  type="text"
+                  value={settings.tableau_filters.vp_team.join(', ')}
+                  onChange={(e) => setSettings((s) => ({ ...s, tableau_filters: { ...s.tableau_filters, vp_team: e.target.value.split(',').map(v => v.trim()).filter(Boolean) }}))}
+                  placeholder="e.g. LATAM, NA"
+                  className="w-full border border-gray-200 rounded px-2 py-1.5 outline-none focus:ring-2 focus:ring-green-400"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex gap-3 items-center pt-2">
+            <button
+              onClick={handleSave as React.MouseEventHandler}
+              className="px-4 py-2 text-sm rounded-lg bg-green-600 text-white hover:bg-green-700"
+            >
+              Save Tableau Settings
+            </button>
+            <button
+              onClick={handleTestTableau}
+              disabled={testingTableau || !settings.tableau_pat_name || !settings.tableau_pat_secret || !settings.tableau_view_id}
+              className="px-4 py-2 text-sm rounded-lg border border-gray-200 hover:bg-gray-50 text-gray-600 disabled:opacity-40"
+            >
+              {testingTableau ? 'Testing…' : 'Test Connection'}
+            </button>
+            {saved && <span className="text-xs text-green-600">✓ Saved</span>}
+          </div>
+          {tableauTestResult && (
+            <div className={`mt-3 px-3 py-2 rounded-lg text-sm ${tableauTestResult.success ? 'bg-green-50 border border-green-200 text-green-800' : 'bg-red-50 border border-red-200 text-red-800'}`}>
+              {tableauTestResult.message}
+            </div>
           )}
         </div>
       </div>

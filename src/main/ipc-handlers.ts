@@ -1,5 +1,7 @@
-import { ipcMain, dialog, shell, Notification } from 'electron';
+import { ipcMain, dialog, shell, Notification, app } from 'electron';
 import Anthropic from '@anthropic-ai/sdk';
+import path from 'node:path';
+import fs from 'node:fs';
 import {
   getAllAccounts,
   insertAccount,
@@ -17,13 +19,35 @@ import {
   upsertQuota,
   deleteQuota,
   setForecastTopDeal,
+  logImport,
+  getImportHistory,
 } from './database';
 import type { AisForecast, ContactStatus } from '../shared/types';
 import { sendTestNotification } from './slack';
 import { runRenewalCheck } from './scheduler';
 import { importCsvFile } from './csv-import';
 import { importForecastCsv, importClosedWonCsv } from './forecast-import';
+import { syncFromTableau } from './tableau-api';
 import type { AccountFormData, AppSettings } from '../shared/types';
+
+/**
+ * Save a backup copy of a CSV file before importing
+ */
+function saveBackupCsv(sourcePath: string): string {
+  const backupsDir = path.join(app.getPath('userData'), 'backups');
+  if (!fs.existsSync(backupsDir)) {
+    fs.mkdirSync(backupsDir, { recursive: true });
+  }
+
+  const timestamp = new Date().toISOString().replace(/:/g, '-').split('.')[0];
+  const filename = `pipeline-backup-${timestamp}.csv`;
+  const backupPath = path.join(backupsDir, filename);
+
+  fs.copyFileSync(sourcePath, backupPath);
+  console.log('[ipc-handlers] Saved backup CSV:', backupPath);
+
+  return filename;
+}
 
 export function registerIpcHandlers(): void {
   ipcMain.handle('accounts:getAll', () => getAllAccounts());
@@ -87,9 +111,105 @@ export function registerIpcHandlers(): void {
   // Forecast
   ipcMain.handle('forecast:getOpps', () => getForecastOpps());
   ipcMain.handle('forecast:getClosedWon', () => getClosedWonOpps());
-  ipcMain.handle('forecast:importPipeline', (_event, filePath: string) => importForecastCsv(filePath));
+
+  ipcMain.handle('forecast:importPipeline', (_event, filePath: string) => {
+    try {
+      // Save backup before importing
+      const backupFilename = saveBackupCsv(filePath);
+
+      // Import the CSV
+      const result = importForecastCsv(filePath);
+
+      // Calculate total pipeline
+      const opps = getForecastOpps();
+      const totalPipeline = opps.reduce((sum, opp) => sum + (opp.ais_arr ?? opp.product_arr_usd), 0);
+
+      // Count rows from CSV
+      const csvContent = fs.readFileSync(filePath, 'utf-8');
+      const rowCount = csvContent.split('\n').filter(line => line.trim()).length - 1; // -1 for header
+
+      // Log the import
+      logImport({
+        source_type: 'csv_upload',
+        backup_filename: backupFilename,
+        row_count: rowCount,
+        inserted_count: result.inserted,
+        updated_count: result.updated,
+        total_pipeline: totalPipeline,
+      });
+
+      return result;
+    } catch (err: any) {
+      console.error('[forecast:importPipeline] Error:', err);
+      throw err;
+    }
+  });
+
   ipcMain.handle('forecast:importClosedWon', (_event, filePath: string) => importClosedWonCsv(filePath));
   ipcMain.handle('analytics:getData', () => getAnalyticsData());
+
+  // Tableau sync
+  ipcMain.handle('tableau:sync', async () => {
+    const settings = getSettings();
+
+    // Validate settings
+    if (!settings.tableau_pat_name || !settings.tableau_pat_secret) {
+      return { success: false, error: 'Tableau PAT credentials not configured. Please add them in Settings.' };
+    }
+    if (!settings.tableau_view_id) {
+      return { success: false, error: 'Tableau View ID not configured. Please add it in Settings.' };
+    }
+
+    // Sync from Tableau
+    const result = await syncFromTableau(
+      settings.tableau_site || 'zendesktableau',
+      settings.tableau_pat_name,
+      settings.tableau_pat_secret,
+      settings.tableau_view_id,
+      settings.tableau_filters,
+    );
+
+    if (!result.success || !result.csvPath) {
+      return { success: false, error: result.error || 'Failed to sync from Tableau' };
+    }
+
+    // Save backup before importing
+    const backupFilename = saveBackupCsv(result.csvPath);
+
+    // Import the CSV data
+    try {
+      const importResult = importForecastCsv(result.csvPath);
+
+      // Calculate total pipeline
+      const opps = getForecastOpps();
+      const totalPipeline = opps.reduce((sum, opp) => sum + (opp.ais_arr ?? opp.product_arr_usd), 0);
+
+      // Count rows from CSV
+      const csvContent = fs.readFileSync(result.csvPath, 'utf-8');
+      const rowCount = csvContent.split('\n').filter(line => line.trim()).length - 1;
+
+      // Log the import
+      logImport({
+        source_type: 'tableau_sync',
+        backup_filename: backupFilename,
+        row_count: rowCount,
+        inserted_count: importResult.inserted,
+        updated_count: importResult.updated,
+        total_pipeline: totalPipeline,
+      });
+
+      // Clean up the temp file
+      try {
+        fs.unlinkSync(result.csvPath);
+      } catch (err) {
+        console.error('[tableau:sync] Failed to delete temp file:', err);
+      }
+
+      return { success: true, result: importResult };
+    } catch (err: any) {
+      return { success: false, error: `Import failed: ${err.message}` };
+    }
+  });
 
   // Quotas
   ipcMain.handle('quotas:getAll', () => getQuotas());
@@ -138,4 +258,19 @@ ${context}`;
       return { ok: true };
     },
   );
+
+  // Import History
+  ipcMain.handle('importHistory:getAll', () => getImportHistory());
+
+  ipcMain.handle('importHistory:openBackup', async (_event, filename: string) => {
+    const backupsDir = path.join(app.getPath('userData'), 'backups');
+    const backupPath = path.join(backupsDir, filename);
+
+    if (!fs.existsSync(backupPath)) {
+      throw new Error('Backup file not found');
+    }
+
+    await shell.openPath(backupPath);
+    return { ok: true };
+  });
 }

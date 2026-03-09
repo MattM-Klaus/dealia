@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('api', {
   getClosedWonOpps: () => ipcRenderer.invoke('forecast:getClosedWon'),
   importForecastPipeline: (filePath: string) => ipcRenderer.invoke('forecast:importPipeline', filePath),
   importForecastClosedWon: (filePath: string) => ipcRenderer.invoke('forecast:importClosedWon', filePath),
+  syncFromTableau: () => ipcRenderer.invoke('tableau:sync'),
   getAnalyticsData: (): Promise<AnalyticsData> => ipcRenderer.invoke('analytics:getData'),
   getQuotas: (): Promise<Quota[]> => ipcRenderer.invoke('quotas:getAll'),
   upsertQuota: (ai_ae: string, data: { region?: string; quota: number; q1_target?: number; q2_target?: number; q3_target?: number; q4_target?: number }): Promise<{ ok: boolean }> => ipcRenderer.invoke('quotas:upsert', ai_ae, data),
@@ -46,4 +47,8 @@ contextBridge.exposeInMainWorld('api', {
     context: string,
   ): Promise<{ ok: boolean; reply?: string; error?: string }> =>
     ipcRenderer.invoke('dealia:chat', messages, context),
+
+  // Import History
+  getImportHistory: () => ipcRenderer.invoke('importHistory:getAll'),
+  openBackupCsv: (filename: string) => ipcRenderer.invoke('importHistory:openBackup', filename),
 });
