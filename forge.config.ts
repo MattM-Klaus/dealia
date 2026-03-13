@@ -56,10 +56,8 @@ const config: ForgeConfig = {
           target: 'preload',
         },
       ],
-      // Renderer dev server is started manually as a workaround for electron-forge Vite plugin
-      // not starting the dev server reliably. For development:
-      // 1. Terminal 1: npx vite --config vite.renderer.config.mts --port 5173
-      // 2. Terminal 2: npm start
+      // Renderer is managed by npm scripts using concurrently
+      // This prevents electron-forge from trying to start Vite (which doesn't work reliably)
       renderer: [],
     }),
     // Fuses are used to enable/disable various Electron functionality

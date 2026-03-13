@@ -25,7 +25,9 @@ const createWindow = () => {
 
   // In development, load from Vite dev server
   // In production, load from built files
-  const devServerUrl = 'http://localhost:5173';
+  const devServerUrl = typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== 'undefined'
+    ? MAIN_WINDOW_VITE_DEV_SERVER_URL
+    : 'http://localhost:5173';
 
   // Try dev server first (will be available in development)
   mainWindow.loadURL(devServerUrl).catch(() => {

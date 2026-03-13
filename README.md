@@ -17,21 +17,18 @@ npm install
 
 ### Running in Development
 
-Due to a known issue with electron-forge's Vite plugin not reliably starting the dev server, we run Vite manually:
+Simply run:
 
-**Terminal 1 - Start Vite Dev Server:**
-```bash
-npx vite --config vite.renderer.config.mts --port 5173
-```
-
-Wait for the message "ready in X ms" before proceeding.
-
-**Terminal 2 - Start Electron:**
 ```bash
 npm start
 ```
 
-The app will automatically connect to the running Vite dev server.
+This will automatically:
+1. Start the Vite dev server
+2. Wait for it to be ready
+3. Launch the Electron app
+
+Both processes run concurrently and will automatically restart when you make changes.
 
 ### Building for Production
 
