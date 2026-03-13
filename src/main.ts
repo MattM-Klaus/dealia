@@ -23,13 +23,17 @@ const createWindow = () => {
     },
   });
 
-  if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-    mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
-  } else {
-    mainWindow.loadFile(
-      path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`),
-    );
-  }
+  // In development, load from Vite dev server
+  // In production, load from built files
+  const devServerUrl = typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== 'undefined'
+    ? MAIN_WINDOW_VITE_DEV_SERVER_URL
+    : 'http://localhost:5173';
+
+  // Try dev server first (will be available in development)
+  mainWindow.loadURL(devServerUrl).catch(() => {
+    // Fallback to production build if dev server not available
+    mainWindow.loadFile(path.join(__dirname, '../renderer/main_window/index.html'));
+  });
 };
 
 app.on('ready', () => {

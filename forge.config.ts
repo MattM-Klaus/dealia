@@ -56,12 +56,9 @@ const config: ForgeConfig = {
           target: 'preload',
         },
       ],
-      renderer: [
-        {
-          name: 'main_window',
-          config: 'vite.renderer.config.mts',
-        },
-      ],
+      // Renderer is managed by npm scripts using concurrently
+      // This prevents electron-forge from trying to start Vite (which doesn't work reliably)
+      renderer: [],
     }),
     // Fuses are used to enable/disable various Electron functionality
     // at package time, before code signing the application
