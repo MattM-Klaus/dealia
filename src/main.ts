@@ -26,11 +26,10 @@ const createWindow = () => {
   // In development: load from our manually-started Vite server (via concurrently)
   // In production: load from bundled files built by prePackage hook
   if (!app.isPackaged) {
-    // Development mode - connect to Vite dev server on port 5173
     mainWindow.loadURL('http://localhost:5173');
   } else {
-    // Production mode - load from built renderer files
-    mainWindow.loadFile(path.join(__dirname, '../renderer/main_window/index.html'));
+    const indexPath = path.join(__dirname, '../renderer/main_window/index.html');
+    mainWindow.loadFile(indexPath);
   }
 };
 
