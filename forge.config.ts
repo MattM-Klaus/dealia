@@ -13,6 +13,7 @@ const config: ForgeConfig = {
     asar: false,
     name: 'Dealia',
     executableName: 'Dealia',
+    icon: './src/assets/icon',
   },
   rebuildConfig: {},
   hooks: {
