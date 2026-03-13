@@ -23,16 +23,19 @@ const createWindow = () => {
     },
   });
 
-  // Check if we're in development mode
-  const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+  // In development with our custom workflow, MAIN_WINDOW_VITE_DEV_SERVER_URL won't be set
+  // because we disabled the renderer in forge config during dev
+  // In production build, electron-forge will set MAIN_WINDOW_VITE_DEV_SERVER_URL and MAIN_WINDOW_VITE_NAME
 
-  if (isDev) {
-    // Development: load from Vite dev server
-    const devServerUrl = 'http://localhost:5173';
-    mainWindow.loadURL(devServerUrl);
+  if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
+    // Development mode via electron-forge (production build will not have this)
+    mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
+  } else if (!app.isPackaged) {
+    // Development with our manual Vite server
+    mainWindow.loadURL('http://localhost:5173');
   } else {
-    // Production: load from built files
-    mainWindow.loadFile(path.join(__dirname, '../renderer/main_window/index.html'));
+    // Production: load from packaged files
+    mainWindow.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`));
   }
 };
 
