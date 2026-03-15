@@ -1,14 +1,19 @@
 {
   "name": "deal-tracker",
   "productName": "Dealia",
-  "version": "1.0.4",
+  "version": "1.0.6",
   "description": "My Electron application description",
   "main": ".vite/build/main.js",
   "private": true,
   "scripts": {
-    "start": "electron-forge start",
-    "package": "electron-forge package",
-    "make": "electron-forge make",
+    "start": "npm run dev",
+    "dev": "concurrently --kill-others \"npm run vite:dev\" \"npm run electron:dev\"",
+    "vite:dev": "vite --config vite.renderer.config.mts --port 5173",
+    "electron:dev": "wait-on http://localhost:5173 && electron-forge start",
+    "start:forge": "electron-forge start",
+    "build:icons": "node scripts/build-icons.js",
+    "package": "npm run build:icons && electron-forge package",
+    "make": "npm run build:icons && electron-forge make",
     "publish": "electron-forge publish",
     "lint": "eslint --ext .ts,.tsx ."
   },
@@ -36,12 +41,16 @@
     "@typescript-eslint/eslint-plugin": "^5.62.0",
     "@typescript-eslint/parser": "^5.62.0",
     "@vitejs/plugin-react": "^5.1.4",
+    "concurrently": "^9.2.1",
     "electron": "40.6.0",
     "eslint": "^8.57.1",
     "eslint-plugin-import": "^2.32.0",
+    "png2icons": "^2.0.1",
+    "sharp": "^0.34.5",
     "tailwindcss": "^4.2.0",
     "typescript": "~4.5.4",
-    "vite": "^5.4.21"
+    "vite": "^5.4.21",
+    "wait-on": "^9.0.4"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
