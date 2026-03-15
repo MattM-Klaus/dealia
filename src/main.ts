@@ -15,7 +15,9 @@ const createWindow = () => {
     height: 700,
     minWidth: 800,
     minHeight: 500,
-    titleBarStyle: 'hiddenInset',
+    resizable: true,
+    movable: true,
+    titleBarStyle: 'default',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
