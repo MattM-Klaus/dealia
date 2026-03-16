@@ -29,7 +29,7 @@ export interface ForecastDashboardFilters {
 }
 
 export interface DashboardFilters {
-  managerFilter: string;
+  managerFilter: Set<string>;
   productFilter: string;
   aiAeFilter: string;
 }
@@ -105,7 +105,7 @@ const getDefaultFilters = (): AllFilters => ({
     aiAeFilter: new Set(),
   },
   dashboard: {
-    managerFilter: '',
+    managerFilter: new Set(),
     productFilter: '',
     aiAeFilter: '',
   },
