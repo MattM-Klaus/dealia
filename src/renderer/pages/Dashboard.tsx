@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import type { Account, ContactStatus } from '../../shared/types';
 import { daysUntil } from '../components/RenewalBadge';
 import ProductTags from '../components/ProductTags';
+import { useFilters } from '../contexts/FilterContext';
 
 const STATUS_CYCLE: ContactStatus[] = ['needs_action', 'in_contact', 'deal_live'];
 
@@ -63,10 +64,11 @@ export default function Dashboard() {
   const [loading, setLoading]           = useState(true);
   const [open, setOpen]                 = useState<Record<SectionKey, boolean>>(DEFAULT_OPEN);
   const [openManagers, setOpenManagers] = useState<Set<string>>(new Set());
-  const [managerFilter, setManagerFilter] = useState('');
-  const [productFilter, setProductFilter] = useState('');
-  const [aiAeFilter, setAiAeFilter]       = useState('');
   const [selected, setSelected]         = useState<Set<number>>(new Set());
+
+  // Filters from context
+  const { filters, updateDashboardFilters } = useFilters();
+  const { managerFilter, productFilter, aiAeFilter } = filters.dashboard;
 
   const load = useCallback(async () => {
     const data = await window.api.getAccounts();
@@ -208,7 +210,7 @@ export default function Dashboard() {
             {allManagers.length > 1 && (
               <select
                 value={managerFilter}
-                onChange={(e) => setManagerFilter(e.target.value)}
+                onChange={(e) => updateDashboardFilters({ managerFilter: e.target.value })}
                 className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 outline-none focus:ring-2 focus:ring-green-400 bg-white"
               >
                 <option value="">All Managers</option>
@@ -218,7 +220,7 @@ export default function Dashboard() {
             {allProducts.length > 1 && (
               <select
                 value={productFilter}
-                onChange={(e) => setProductFilter(e.target.value)}
+                onChange={(e) => updateDashboardFilters({ productFilter: e.target.value })}
                 className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 outline-none focus:ring-2 focus:ring-green-400 bg-white"
               >
                 <option value="">All Products</option>
@@ -228,7 +230,7 @@ export default function Dashboard() {
             {allAiAes.length > 1 && (
               <select
                 value={aiAeFilter}
-                onChange={(e) => setAiAeFilter(e.target.value)}
+                onChange={(e) => updateDashboardFilters({ aiAeFilter: e.target.value })}
                 className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 outline-none focus:ring-2 focus:ring-green-400 bg-white"
               >
                 <option value="">All AEs</option>
@@ -237,7 +239,7 @@ export default function Dashboard() {
             )}
             {(managerFilter || productFilter || aiAeFilter) && (
               <button
-                onClick={() => { setManagerFilter(''); setProductFilter(''); setAiAeFilter(''); }}
+                onClick={() => updateDashboardFilters({ managerFilter: '', productFilter: '', aiAeFilter: '' })}
                 className="text-xs text-gray-400 hover:text-gray-600 px-2"
               >
                 Clear

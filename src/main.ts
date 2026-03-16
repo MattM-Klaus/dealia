@@ -15,7 +15,9 @@ const createWindow = () => {
     height: 700,
     minWidth: 800,
     minHeight: 500,
-    titleBarStyle: 'hiddenInset',
+    resizable: true,
+    movable: true,
+    titleBarStyle: 'default',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -23,12 +25,13 @@ const createWindow = () => {
     },
   });
 
-  if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-    mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
+  // In development: load from our manually-started Vite server (via concurrently)
+  // In production: load from bundled files built by prePackage hook
+  if (!app.isPackaged) {
+    mainWindow.loadURL('http://localhost:5173');
   } else {
-    mainWindow.loadFile(
-      path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`),
-    );
+    const indexPath = path.join(__dirname, '../renderer/main_window/index.html');
+    mainWindow.loadFile(indexPath);
   }
 };
 
