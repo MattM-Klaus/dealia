@@ -424,21 +424,6 @@ export function importClosedWonCsv(filePath: string): ForecastImportResult {
 
   // Now parse the full file with the fixed headers
   const { data } = Papa.parse<Record<string, string>>(fileContent, {
-  // First, fix any missing headers by adding generic names
-  const lines = fileContent.split('\n');
-  if (lines.length > 0) {
-    const headerParts = lines[0].split('\t');
-    // Add header names for any empty columns (typically the last column with bookings)
-    for (let i = 0; i < headerParts.length; i++) {
-      if (!headerParts[i] || headerParts[i].trim() === '') {
-        headerParts[i] = `unnamed_column_${i}`;
-      }
-    }
-    lines[0] = headerParts.join('\t');
-  }
-  const fixedContent = lines.join('\n');
-
-  const { data } = Papa.parse<Record<string, string>>(fixedContent, {
     header: true,
     skipEmptyLines: true,
     delimiter: '\t',
