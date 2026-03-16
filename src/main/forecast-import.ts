@@ -166,7 +166,21 @@ export function importForecastCsv(filePath: string): ForecastImportResult {
   const fileContent = readCsvFile(filePath);
   console.log('[forecast-import] File read, length:', fileContent.length);
 
-  const { data, errors: parseErrors } = Papa.parse<Record<string, string>>(fileContent, {
+  // First, fix any missing headers by adding generic names
+  const lines = fileContent.split('\n');
+  if (lines.length > 0) {
+    const headerParts = lines[0].split('\t');
+    // Add header names for any empty columns (typically the last column with ARR)
+    for (let i = 0; i < headerParts.length; i++) {
+      if (!headerParts[i] || headerParts[i].trim() === '') {
+        headerParts[i] = `unnamed_column_${i}`;
+      }
+    }
+    lines[0] = headerParts.join('\t');
+  }
+  const fixedContent = lines.join('\n');
+
+  const { data, errors: parseErrors } = Papa.parse<Record<string, string>>(fixedContent, {
     header: true,
     skipEmptyLines: true,
     transformHeader: normalizeHeaders,
@@ -223,11 +237,31 @@ export function importForecastCsv(filePath: string): ForecastImportResult {
     try {
       const oppId = row['crm_opportunity_id']?.trim() || '';
       if (!oppId) throw new Error('Missing Crm Opportunity Id');
+
+      // Try multiple possible column names for ARR amount
+      // Also check unnamed columns (often the last column in Tableau exports)
+      let arrValue = row['product_arr_usd'] || row['arr'] || row['amount'] || '';
+
+      // If no named column found, check for unnamed columns
+      if (!arrValue) {
+        for (const key of Object.keys(row)) {
+          if (key.startsWith('unnamed_column_')) {
+            const val = row[key]?.trim();
+            if (val && /^[\d,.$]+$/.test(val)) {
+              arrValue = val;
+              break;
+            }
+          }
+        }
+      }
+
+      if (!arrValue) arrValue = '0';
+
       rawRows.push({
         rowNum,
         oppId,
         product:                    row['product']?.trim() || '',
-        tableauArr:                 parseAmount(row['product_arr_usd'] || '0'),
+        tableauArr:                 parseAmount(arrValue),
         closeDate:                  parseDate(row['closedate'] || ''),
         s2PlusDate:                 parseDate(row['s2_date'] || ''),
         sfdc_account_id:            row['account_id']?.trim() || '',
