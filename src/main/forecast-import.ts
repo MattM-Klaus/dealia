@@ -166,24 +166,37 @@ export function importForecastCsv(filePath: string): ForecastImportResult {
   const fileContent = readCsvFile(filePath);
   console.log('[forecast-import] File read, length:', fileContent.length);
 
-  // First, fix any missing headers by adding generic names
-  const lines = fileContent.split('\n');
-  if (lines.length > 0) {
-    const headerParts = lines[0].split('\t');
-    // Add header names for any empty columns (typically the last column with ARR)
-    for (let i = 0; i < headerParts.length; i++) {
-      if (!headerParts[i] || headerParts[i].trim() === '') {
-        headerParts[i] = `unnamed_column_${i}`;
-      }
-    }
-    lines[0] = headerParts.join('\t');
-  }
-  const fixedContent = lines.join('\n');
+  // Parse the file to get headers, handling multi-line quoted fields properly
+  const headerPreview = Papa.parse<string[]>(fileContent, {
+    header: false,
+    preview: 1,
+    skipEmptyLines: true,
+    delimiter: '\t',
+  });
 
-  const { data, errors: parseErrors } = Papa.parse<Record<string, string>>(fixedContent, {
+  if (!headerPreview.data || headerPreview.data.length === 0) {
+    return { inserted: 0, updated: 0, failed: 0, synced_renewals: 0, changes_detected: 0, errors: ['Failed to parse CSV headers'] };
+  }
+
+  // Fix any missing headers by adding generic names
+  const headers = headerPreview.data[0];
+  const fixedHeaders = headers.map((h, i) => {
+    const trimmed = (h || '').trim();
+    return trimmed === '' ? `unnamed_column_${i}` : trimmed;
+  });
+
+  console.log('[forecast-import] Original headers:', headers.length, '| Fixed headers:', fixedHeaders.length);
+
+  // Now parse the full file with the fixed headers
+  const { data, errors: parseErrors } = Papa.parse<Record<string, string>>(fileContent, {
     header: true,
     skipEmptyLines: true,
-    transformHeader: normalizeHeaders,
+    delimiter: '\t',
+    transformHeader: (h: string, index: number) => {
+      // Use our fixed headers instead of the original ones
+      const fixed = fixedHeaders[index] || h;
+      return normalizeHeaders(fixed);
+    },
   });
 
   console.log('[forecast-import] Parsed rows:', data.length, 'parse errors:', parseErrors.length);
@@ -390,24 +403,35 @@ export function importForecastCsv(filePath: string): ForecastImportResult {
 export function importClosedWonCsv(filePath: string): ForecastImportResult {
   const fileContent = readCsvFile(filePath);
 
-  // First, fix any missing headers by adding generic names
-  const lines = fileContent.split('\n');
-  if (lines.length > 0) {
-    const headerParts = lines[0].split('\t');
-    // Add header names for any empty columns (typically the last column with bookings)
-    for (let i = 0; i < headerParts.length; i++) {
-      if (!headerParts[i] || headerParts[i].trim() === '') {
-        headerParts[i] = `unnamed_column_${i}`;
-      }
-    }
-    lines[0] = headerParts.join('\t');
-  }
-  const fixedContent = lines.join('\n');
+  // Parse the file to get headers, handling multi-line quoted fields properly
+  const headerPreview = Papa.parse<string[]>(fileContent, {
+    header: false,
+    preview: 1,
+    skipEmptyLines: true,
+    delimiter: '\t',
+  });
 
-  const { data } = Papa.parse<Record<string, string>>(fixedContent, {
+  if (!headerPreview.data || headerPreview.data.length === 0) {
+    return { inserted: 0, updated: 0, failed: 0, synced_renewals: 0, changes_detected: 0, errors: ['Failed to parse CSV headers'] };
+  }
+
+  // Fix any missing headers by adding generic names
+  const headers = headerPreview.data[0];
+  const fixedHeaders = headers.map((h, i) => {
+    const trimmed = (h || '').trim();
+    return trimmed === '' ? `unnamed_column_${i}` : trimmed;
+  });
+
+  // Now parse the full file with the fixed headers
+  const { data } = Papa.parse<Record<string, string>>(fileContent, {
     header: true,
     skipEmptyLines: true,
-    transformHeader: normalizeHeaders,
+    delimiter: '\t',
+    transformHeader: (h: string, index: number) => {
+      // Use our fixed headers instead of the original ones
+      const fixed = fixedHeaders[index] || h;
+      return normalizeHeaders(fixed);
+    },
   });
 
   const result: ForecastImportResult = { inserted: 0, updated: 0, failed: 0, synced_renewals: 0, changes_detected: 0, errors: [] };
