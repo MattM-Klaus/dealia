@@ -166,24 +166,37 @@ export function importForecastCsv(filePath: string): ForecastImportResult {
   const fileContent = readCsvFile(filePath);
   console.log('[forecast-import] File read, length:', fileContent.length);
 
-  // First, fix any missing headers by adding generic names
-  const lines = fileContent.split('\n');
-  if (lines.length > 0) {
-    const headerParts = lines[0].split('\t');
-    // Add header names for any empty columns (typically the last column with ARR)
-    for (let i = 0; i < headerParts.length; i++) {
-      if (!headerParts[i] || headerParts[i].trim() === '') {
-        headerParts[i] = `unnamed_column_${i}`;
-      }
-    }
-    lines[0] = headerParts.join('\t');
-  }
-  const fixedContent = lines.join('\n');
+  // Parse the file to get headers, handling multi-line quoted fields properly
+  const headerPreview = Papa.parse<string[]>(fileContent, {
+    header: false,
+    preview: 1,
+    skipEmptyLines: true,
+    delimiter: '\t',
+  });
 
-  const { data, errors: parseErrors } = Papa.parse<Record<string, string>>(fixedContent, {
+  if (!headerPreview.data || headerPreview.data.length === 0) {
+    return { inserted: 0, updated: 0, failed: 0, synced_renewals: 0, changes_detected: 0, errors: ['Failed to parse CSV headers'] };
+  }
+
+  // Fix any missing headers by adding generic names
+  const headers = headerPreview.data[0];
+  const fixedHeaders = headers.map((h, i) => {
+    const trimmed = (h || '').trim();
+    return trimmed === '' ? `unnamed_column_${i}` : trimmed;
+  });
+
+  console.log('[forecast-import] Original headers:', headers.length, '| Fixed headers:', fixedHeaders.length);
+
+  // Now parse the full file with the fixed headers
+  const { data, errors: parseErrors } = Papa.parse<Record<string, string>>(fileContent, {
     header: true,
     skipEmptyLines: true,
-    transformHeader: normalizeHeaders,
+    delimiter: '\t',
+    transformHeader: (h: string, index: number) => {
+      // Use our fixed headers instead of the original ones
+      const fixed = fixedHeaders[index] || h;
+      return normalizeHeaders(fixed);
+    },
   });
 
   console.log('[forecast-import] Parsed rows:', data.length, 'parse errors:', parseErrors.length);
@@ -389,10 +402,36 @@ export function importForecastCsv(filePath: string): ForecastImportResult {
 
 export function importClosedWonCsv(filePath: string): ForecastImportResult {
   const fileContent = readCsvFile(filePath);
+
+  // Parse the file to get headers, handling multi-line quoted fields properly
+  const headerPreview = Papa.parse<string[]>(fileContent, {
+    header: false,
+    preview: 1,
+    skipEmptyLines: true,
+    delimiter: '\t',
+  });
+
+  if (!headerPreview.data || headerPreview.data.length === 0) {
+    return { inserted: 0, updated: 0, failed: 0, synced_renewals: 0, changes_detected: 0, errors: ['Failed to parse CSV headers'] };
+  }
+
+  // Fix any missing headers by adding generic names
+  const headers = headerPreview.data[0];
+  const fixedHeaders = headers.map((h, i) => {
+    const trimmed = (h || '').trim();
+    return trimmed === '' ? `unnamed_column_${i}` : trimmed;
+  });
+
+  // Now parse the full file with the fixed headers
   const { data } = Papa.parse<Record<string, string>>(fileContent, {
     header: true,
     skipEmptyLines: true,
-    transformHeader: normalizeHeaders,
+    delimiter: '\t',
+    transformHeader: (h: string, index: number) => {
+      // Use our fixed headers instead of the original ones
+      const fixed = fixedHeaders[index] || h;
+      return normalizeHeaders(fixed);
+    },
   });
 
   const result: ForecastImportResult = { inserted: 0, updated: 0, failed: 0, synced_renewals: 0, changes_detected: 0, errors: [] };
@@ -407,6 +446,25 @@ export function importClosedWonCsv(filePath: string): ForecastImportResult {
       const oppId = row['crm_opportunity_id']?.trim() || '';
       if (!oppId) throw new Error('Missing Crm Opportunity Id');
 
+      // Try multiple possible column names for bookings amount
+      // Also check unnamed columns (often the last column in Tableau exports)
+      let bookingsValue = row['bookings'] || row['product_arr_usd'] || row['arr'] || row['amount'] || '';
+
+      // If no named column found, check for unnamed columns
+      if (!bookingsValue) {
+        for (const key of Object.keys(row)) {
+          if (key.startsWith('unnamed_column_')) {
+            const val = row[key]?.trim();
+            if (val && /^[\d,.$]+$/.test(val)) {
+              bookingsValue = val;
+              break;
+            }
+          }
+        }
+      }
+
+      if (!bookingsValue) bookingsValue = '0';
+
       opps.push({
         crm_opportunity_id: oppId,
         account_name: row['account_name']?.trim() || '',
@@ -418,7 +476,7 @@ export function importClosedWonCsv(filePath: string): ForecastImportResult {
         type: row['type']?.trim() || '',
         ai_ae: row['ai_ae']?.trim() || '',
         close_date: parseDate(row['closedate'] || ''),
-        bookings: parseAmount(row['bookings'] || '0'),
+        bookings: parseAmount(bookingsValue),
       });
     } catch (err) {
       result.failed++;
