@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { AlertReason, AnalyticsData, ChangeType, ClosedWonOpp, ForecastChange, ForecastDifference, ForecastOpp, OppPushStats, Quota } from '../../shared/types';
 import { mapForecast, toCloseQuarter } from '../../shared/utils';
+import { useFilters } from '../contexts/FilterContext';
 
 // ── Formatters ─────────────────────────────────────────────────
 
@@ -109,23 +110,14 @@ export default function Analytics() {
   const [loading, setLoading]   = useState(true);
   const [pageTab, setPageTab]   = useState<PageTab>('executive');
 
+  // Filters from context
+  const { filters, updateAnalyticsOverviewFilters, updateAnalyticsChangesFilters } = useFilters();
+
   // Overview filters
-  const [quarterFilter, setQuarterFilter]     = useState<Set<string>>(new Set([toCloseQuarter(new Date().toISOString().split('T')[0])]));
-  const [managerFilterOv, setManagerFilterOv] = useState<Set<string>>(new Set());
-  const [aiAeFilterOv, setAiAeFilterOv]       = useState<Set<string>>(new Set());
-  const [regionFilterOv, setRegionFilterOv]   = useState<Set<string>>(new Set());
-  const [segmentFilterOv, setSegmentFilterOv] = useState<Set<string>>(new Set());
+  const { quarterFilter, managerFilter: managerFilterOv, aiAeFilter: aiAeFilterOv, regionFilter: regionFilterOv, segmentFilter: segmentFilterOv } = filters.analyticsOverview;
 
   // Changes filters
-  const [changesTab, setChangesTab]         = useState<ChangesTab>('all');
-  const [aiAeFilter, setAiAeFilter]         = useState<Set<string>>(new Set());
-  const [managerFilter, setManagerFilter]   = useState<Set<string>>(new Set());
-  const [regionFilter, setRegionFilter]     = useState<Set<string>>(new Set());
-  const [segmentFilter, setSegmentFilter]   = useState<Set<string>>(new Set());
-  const [importFilter, setImportFilter]     = useState('');
-  const [chDatePreset, setChDatePreset]     = useState<'latest' | 'last7' | 'last14' | 'this_month' | 'custom'>('latest');
-  const [chCustomFrom, setChCustomFrom]     = useState('');
-  const [chCustomTo, setChCustomTo]         = useState('');
+  const { changesTab, aiAeFilter, managerFilter, regionFilter, segmentFilter, importFilter, chDatePreset, chCustomFrom, chCustomTo } = filters.analyticsChanges;
 
   const load = useCallback(async () => {
     const [d, o, cw, q] = await Promise.all([
@@ -183,38 +175,38 @@ export default function Analytics() {
             multiPushOpps={data?.multiPushOpps ?? []}
             forecastDifferences={data?.forecastDifferences ?? []}
             quarterFilter={quarterFilter}
-            setQuarterFilter={setQuarterFilter}
+            setQuarterFilter={(v) => updateAnalyticsOverviewFilters({ quarterFilter: v })}
             managerFilter={managerFilterOv}
-            setManagerFilter={setManagerFilterOv}
+            setManagerFilter={(v) => updateAnalyticsOverviewFilters({ managerFilter: v })}
             aiAeFilter={aiAeFilterOv}
-            setAiAeFilter={setAiAeFilterOv}
+            setAiAeFilter={(v) => updateAnalyticsOverviewFilters({ aiAeFilter: v })}
             regionFilter={regionFilterOv}
-            setRegionFilter={setRegionFilterOv}
+            setRegionFilter={(v) => updateAnalyticsOverviewFilters({ regionFilter: v })}
             segmentFilter={segmentFilterOv}
-            setSegmentFilter={setSegmentFilterOv}
+            setSegmentFilter={(v) => updateAnalyticsOverviewFilters({ segmentFilter: v })}
           />
         : pageTab === 'changes'
         ? <ChangesTab
             data={data}
             opps={opps}
             tab={changesTab}
-            setTab={setChangesTab}
+            setTab={(v) => updateAnalyticsChangesFilters({ changesTab: v })}
             aiAeFilter={aiAeFilter}
-            setAiAeFilter={setAiAeFilter}
+            setAiAeFilter={(v) => updateAnalyticsChangesFilters({ aiAeFilter: v })}
             managerFilter={managerFilter}
-            setManagerFilter={setManagerFilter}
+            setManagerFilter={(v) => updateAnalyticsChangesFilters({ managerFilter: v })}
             regionFilter={regionFilter}
-            setRegionFilter={setRegionFilter}
+            setRegionFilter={(v) => updateAnalyticsChangesFilters({ regionFilter: v })}
             segmentFilter={segmentFilter}
-            setSegmentFilter={setSegmentFilter}
+            setSegmentFilter={(v) => updateAnalyticsChangesFilters({ segmentFilter: v })}
             importFilter={importFilter}
-            setImportFilter={setImportFilter}
+            setImportFilter={(v) => updateAnalyticsChangesFilters({ importFilter: v })}
             chDatePreset={chDatePreset}
-            setChDatePreset={setChDatePreset}
+            setChDatePreset={(v) => updateAnalyticsChangesFilters({ chDatePreset: v })}
             chCustomFrom={chCustomFrom}
-            setChCustomFrom={setChCustomFrom}
+            setChCustomFrom={(v) => updateAnalyticsChangesFilters({ chCustomFrom: v })}
             chCustomTo={chCustomTo}
-            setChCustomTo={setChCustomTo}
+            setChCustomTo={(v) => updateAnalyticsChangesFilters({ chCustomTo: v })}
           />
         : <ExecutiveSummaryTab
             changes={data?.changes ?? []}

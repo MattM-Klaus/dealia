@@ -10,27 +10,30 @@ import ClosedWon from './pages/ClosedWon';
 import ForecastDashboard from './pages/ForecastDashboard';
 import Settings from './pages/Settings';
 import History from './pages/History';
+import { FilterProvider } from './contexts/FilterContext';
 
 export default function App() {
   return (
-    <MemoryRouter initialEntries={['/dashboard']}>
-      <div className="flex h-screen bg-gray-50 text-gray-900 overflow-hidden">
-        <Sidebar />
-        <main className="flex-1 flex flex-col overflow-hidden">
-          <Routes>
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/accounts" element={<Accounts />} />
-            <Route path="/pipeline" element={<Pipeline />} />
-            <Route path="/closed-won" element={<ClosedWon />} />
-            <Route path="/forecast-dashboard" element={<ForecastDashboard />} />
-            <Route path="/analytics" element={<Analytics />} />
-            <Route path="/dealia" element={<Dealia />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="/history" element={<History />} />
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
-          </Routes>
-        </main>
-      </div>
-    </MemoryRouter>
+    <FilterProvider>
+      <MemoryRouter initialEntries={['/dashboard']}>
+        <div className="flex h-screen bg-gray-50 text-gray-900 overflow-hidden">
+          <Sidebar />
+          <main className="flex-1 flex flex-col overflow-hidden">
+            <Routes>
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/accounts" element={<Accounts />} />
+              <Route path="/pipeline" element={<Pipeline />} />
+              <Route path="/closed-won" element={<ClosedWon />} />
+              <Route path="/forecast-dashboard" element={<ForecastDashboard />} />
+              <Route path="/analytics" element={<Analytics />} />
+              <Route path="/dealia" element={<Dealia />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route path="/history" element={<History />} />
+              <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            </Routes>
+          </main>
+        </div>
+      </MemoryRouter>
+    </FilterProvider>
   );
 }
