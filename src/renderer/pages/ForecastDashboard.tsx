@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { AisForecast, ClosedWonOpp, ForecastOpp } from '../../shared/types';
 import { toCloseQuarter } from '../../shared/utils';
+import { useFilters } from '../contexts/FilterContext';
 
 const PRODUCT_COLORS: Record<string, string> = {
   'ai agents': 'bg-purple-100 text-purple-700',
@@ -31,10 +32,9 @@ export default function ForecastDashboard() {
   const [closedWon, setClosedWon] = useState<ClosedWonOpp[]>([]);
   const [loading, setLoading]     = useState(true);
 
-  const [quarterFilter, setQuarterFilter] = useState<Set<string>>(new Set([toCloseQuarter(new Date().toISOString().split('T')[0])]));
-  const [regionFilter, setRegionFilter]   = useState<Set<string>>(new Set());
-  const [managerFilter, setManagerFilter] = useState<Set<string>>(new Set());
-  const [aiAeFilter, setAiAeFilter]       = useState<Set<string>>(new Set());
+  // Filters from context
+  const { filters, updateForecastDashboardFilters } = useFilters();
+  const { quarterFilter, regionFilter, managerFilter, aiAeFilter } = filters.forecastDashboard;
 
   const load = useCallback(async () => {
     const [o, cw] = await Promise.all([
@@ -111,13 +111,13 @@ export default function ForecastDashboard() {
           <p className="text-sm text-gray-400 mt-0.5">Manager-ready summary — closed won &amp; AIS pipeline</p>
         </div>
         <div className="flex items-center gap-2">
-          <MultiSelect options={allQuarters} selected={quarterFilter} onChange={setQuarterFilter} placeholder="All Quarters" noun="Quarters" />
-          <MultiSelect options={allRegions}  selected={regionFilter}  onChange={setRegionFilter}  placeholder="All Regions"  noun="Regions"  />
-          <MultiSelect options={allManagers} selected={managerFilter} onChange={setManagerFilter} placeholder="All Managers" noun="Managers" />
-          <MultiSelect options={allAiAes}    selected={aiAeFilter}    onChange={setAiAeFilter}    placeholder="All AI AEs"   noun="AI AEs"   />
+          <MultiSelect options={allQuarters} selected={quarterFilter} onChange={(v) => updateForecastDashboardFilters({ quarterFilter: v })} placeholder="All Quarters" noun="Quarters" />
+          <MultiSelect options={allRegions}  selected={regionFilter}  onChange={(v) => updateForecastDashboardFilters({ regionFilter: v })}  placeholder="All Regions"  noun="Regions"  />
+          <MultiSelect options={allManagers} selected={managerFilter} onChange={(v) => updateForecastDashboardFilters({ managerFilter: v })} placeholder="All Managers" noun="Managers" />
+          <MultiSelect options={allAiAes}    selected={aiAeFilter}    onChange={(v) => updateForecastDashboardFilters({ aiAeFilter: v })}    placeholder="All AI AEs"   noun="AI AEs"   />
           {(quarterFilter.size > 0 || regionFilter.size > 0 || managerFilter.size > 0 || aiAeFilter.size > 0) && (
             <button
-              onClick={() => { setQuarterFilter(new Set()); setRegionFilter(new Set()); setManagerFilter(new Set()); setAiAeFilter(new Set()); }}
+              onClick={() => updateForecastDashboardFilters({ quarterFilter: new Set(), regionFilter: new Set(), managerFilter: new Set(), aiAeFilter: new Set() })}
               className="text-xs text-gray-400 hover:text-gray-600 px-2"
             >
               Clear
