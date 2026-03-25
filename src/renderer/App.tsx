@@ -10,6 +10,7 @@ import ClosedWon from './pages/ClosedWon';
 import ForecastDashboard from './pages/ForecastDashboard';
 import Settings from './pages/Settings';
 import History from './pages/History';
+import WeeklyTrends from './pages/WeeklyTrends';
 
 export default function App() {
   return (
@@ -24,6 +25,7 @@ export default function App() {
             <Route path="/closed-won" element={<ClosedWon />} />
             <Route path="/forecast-dashboard" element={<ForecastDashboard />} />
             <Route path="/analytics" element={<Analytics />} />
+            <Route path="/weekly-trends" element={<WeeklyTrends />} />
             <Route path="/dealia" element={<Dealia />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/history" element={<History />} />

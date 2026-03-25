@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { ClosedWonOpp, ForecastImportResult } from '../../shared/types';
 import { toCloseQuarter } from '../../shared/utils';
 
@@ -26,6 +26,13 @@ function fmtDate(dateStr: string | null | undefined): string {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+function toCloseMonth(dateStr: string): string {
+  if (!dateStr) return '';
+  const d = new Date(dateStr + 'T00:00:00');
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+}
+
 function oppSfdcUrl(oppId: string): string {
   return `https://zendesk.lightning.force.com/lightning/r/Opportunity/${oppId}/view`;
 }
@@ -43,6 +50,7 @@ export default function ClosedWon() {
   const [searchQuery, setSearchQuery]     = useState('');
   const [managerFilter, setManagerFilter] = useState('');
   const [quarterFilter, setQuarterFilter] = useState(toCloseQuarter(new Date().toISOString().split('T')[0]));
+  const [monthFilter, setMonthFilter]     = useState('');
   const [aiAeFilter, setAiAeFilter]       = useState('');
 
   const load = useCallback(async () => {
@@ -82,17 +90,19 @@ export default function ClosedWon() {
   // Derived filter options
   const allManagers = [...new Set(closedWon.map((o) => o.manager_name).filter(Boolean))].sort();
   const allQuarters = [...new Set(closedWon.map((o) => toCloseQuarter(o.close_date)).filter(Boolean))].sort();
+  const allMonths   = [...new Set(closedWon.map((o) => toCloseMonth(o.close_date)).filter(Boolean))].sort().reverse();
   const allAiAes    = [...new Set(closedWon.map((o) => o.ai_ae).filter(Boolean))].sort();
 
   const filtered = closedWon.filter((o) => {
     if (searchQuery && !o.account_name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
     if (managerFilter && o.manager_name !== managerFilter) return false;
     if (quarterFilter && toCloseQuarter(o.close_date) !== quarterFilter) return false;
+    if (monthFilter && toCloseMonth(o.close_date) !== monthFilter) return false;
     if (aiAeFilter && o.ai_ae !== aiAeFilter) return false;
     return true;
   });
 
-  const totalBookings  = filtered.reduce((s, o) => s + o.bookings, 0);
+  const totalBookings  = filtered.reduce((s, o) => s + (o.edited_bookings ?? o.bookings), 0);
 
   // Unique opps: group by crm_opportunity_id (one opp may have multiple product rows)
   const uniqueOppIds   = new Set(filtered.map((o) => o.crm_opportunity_id));
@@ -103,7 +113,7 @@ export default function ClosedWon() {
   const allProducts = [...new Set(filtered.map((o) => o.product).filter(Boolean))].sort();
   const productStats = allProducts.map((product) => {
     const rows  = filtered.filter((o) => o.product === product);
-    const total = rows.reduce((s, o) => s + o.bookings, 0);
+    const total = rows.reduce((s, o) => s + (o.edited_bookings ?? o.bookings), 0);
     return { product, avg: rows.length > 0 ? total / rows.length : 0, count: rows.length };
   });
 
@@ -191,10 +201,11 @@ export default function ClosedWon() {
       <div className="flex gap-2 mb-3 flex-wrap items-center">
         <FilterSelect value={managerFilter} onChange={setManagerFilter} options={allManagers} placeholder="All Managers" />
         <FilterSelect value={quarterFilter} onChange={setQuarterFilter} options={allQuarters} placeholder="All Quarters" />
+        <FilterSelect value={monthFilter} onChange={setMonthFilter} options={allMonths} placeholder="All Months" />
         <FilterSelect value={aiAeFilter} onChange={setAiAeFilter} options={allAiAes} placeholder="All AI AEs" />
-        {(searchQuery || managerFilter || quarterFilter || aiAeFilter) && (
+        {(searchQuery || managerFilter || quarterFilter || monthFilter || aiAeFilter) && (
           <button
-            onClick={() => { setSearchQuery(''); setManagerFilter(''); setQuarterFilter(''); setAiAeFilter(''); }}
+            onClick={() => { setSearchQuery(''); setManagerFilter(''); setQuarterFilter(''); setMonthFilter(''); setAiAeFilter(''); }}
             className="text-xs text-gray-400 hover:text-gray-600 px-2"
           >
             Clear filters
@@ -230,35 +241,13 @@ export default function ClosedWon() {
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {filtered.map((opp) => (
-                  <tr key={opp.id} className="hover:bg-gray-50 transition-colors">
-                    <Td>
-                      <button
-                        onClick={() => window.api.openExternal(oppSfdcUrl(opp.crm_opportunity_id))}
-                        className="text-blue-500 hover:text-blue-700 hover:underline whitespace-nowrap"
-                      >
-                        SFDC ↗
-                      </button>
-                    </Td>
-                    <Td bold>{opp.account_name}</Td>
-                    <Td>{opp.manager_name}</Td>
-                    <Td>{opp.ae_name}</Td>
-                    <Td>{opp.ai_ae}</Td>
-                    <Td>{opp.region}</Td>
-                    <Td>{opp.segment}</Td>
-                    <Td>
-                      <span className={`px-1.5 py-0.5 rounded text-xs font-medium whitespace-nowrap ${productClass(opp.product)}`}>
-                        {opp.product}
-                      </span>
-                    </Td>
-                    <Td>{opp.type}</Td>
-                    <Td nowrap>{fmtDate(opp.close_date)}</Td>
-                    <Td>
-                      <span className="font-mono text-gray-600">{toCloseQuarter(opp.close_date) || '—'}</span>
-                    </Td>
-                    <Td right>
-                      <span className="font-semibold text-green-700">{fmtCurrency(opp.bookings)}</span>
-                    </Td>
-                  </tr>
+                  <ClosedWonRow
+                    key={opp.id}
+                    opp={opp}
+                    onUpdate={(field, value) => {
+                      setClosedWon((prev) => prev.map((o) => (o.id === opp.id ? { ...o, [field]: value } : o)));
+                    }}
+                  />
                 ))}
               </tbody>
             </table>
@@ -266,6 +255,99 @@ export default function ClosedWon() {
         </div>
       )}
     </div>
+  );
+}
+
+// ── ClosedWonRow ───────────────────────────────────────────────
+
+function ClosedWonRow({
+  opp,
+  onUpdate,
+}: {
+  opp: ClosedWonOpp;
+  onUpdate: (field: 'edited_bookings', value: number | null) => void;
+}) {
+  const [editingBookings, setEditingBookings] = useState(false);
+  const [bookingsInput, setBookingsInput] = useState('');
+  const bookingsInputRef = useRef<HTMLInputElement>(null);
+
+  const displayBookings = opp.edited_bookings ?? opp.bookings;
+  const isEdited = opp.edited_bookings !== null;
+
+  const handleBookingsClick = () => {
+    setBookingsInput(String(displayBookings));
+    setEditingBookings(true);
+    setTimeout(() => bookingsInputRef.current?.select(), 0);
+  };
+
+  const saveBookings = async () => {
+    const parsed = parseFloat(bookingsInput);
+    if (isNaN(parsed) || parsed < 0) {
+      setEditingBookings(false);
+      return;
+    }
+
+    const newValue = parsed === opp.bookings ? null : parsed;
+    await window.api.updateClosedWonBookings(opp.id, newValue);
+    onUpdate('edited_bookings', newValue);
+    setEditingBookings(false);
+  };
+
+  const handleBookingsKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') saveBookings();
+    if (e.key === 'Escape') setEditingBookings(false);
+  };
+
+  return (
+    <tr className="hover:bg-gray-50 transition-colors">
+      <Td>
+        <button
+          onClick={() => window.api.openExternal(oppSfdcUrl(opp.crm_opportunity_id))}
+          className="text-blue-500 hover:text-blue-700 hover:underline whitespace-nowrap"
+        >
+          SFDC ↗
+        </button>
+      </Td>
+      <Td bold>{opp.account_name}</Td>
+      <Td>{opp.manager_name}</Td>
+      <Td>{opp.ae_name}</Td>
+      <Td>{opp.ai_ae}</Td>
+      <Td>{opp.region}</Td>
+      <Td>{opp.segment}</Td>
+      <Td>
+        <span className={`px-1.5 py-0.5 rounded text-xs font-medium whitespace-nowrap ${productClass(opp.product)}`}>
+          {opp.product}
+        </span>
+      </Td>
+      <Td>{opp.type}</Td>
+      <Td nowrap>{fmtDate(opp.close_date)}</Td>
+      <Td>
+        <span className="font-mono text-gray-600">{toCloseQuarter(opp.close_date) || '—'}</span>
+      </Td>
+      <Td right>
+        {editingBookings ? (
+          <input
+            ref={bookingsInputRef}
+            type="number"
+            value={bookingsInput}
+            onChange={(e) => setBookingsInput(e.target.value)}
+            onBlur={saveBookings}
+            onKeyDown={handleBookingsKeyDown}
+            className="w-24 text-right text-xs px-1 py-0.5 border border-blue-300 rounded outline-none focus:ring-1 focus:ring-blue-400"
+          />
+        ) : (
+          <button
+            onClick={handleBookingsClick}
+            className={`font-semibold hover:bg-gray-100 px-1 py-0.5 rounded ${
+              isEdited ? 'text-blue-700 bg-blue-50' : 'text-green-700'
+            }`}
+            title={isEdited ? `Edited from ${fmtCurrency(opp.bookings)}` : 'Click to edit'}
+          >
+            {fmtCurrency(displayBookings)}
+          </button>
+        )}
+      </Td>
+    </tr>
   );
 }
 

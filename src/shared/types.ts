@@ -111,6 +111,8 @@ export interface ForecastOpp {
   push_count: number;
   total_days_pushed: number;
   stage_entered_at: string | null;
+  // Exclude from analysis flag (for data corrections)
+  exclude_from_analysis: number;
   created_at: string;
   updated_at: string;
 }
@@ -138,6 +140,7 @@ export interface ClosedWonOpp {
   ai_ae: string;
   close_date: string;
   bookings: number;
+  edited_bookings: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -201,9 +204,14 @@ export interface ForecastDifference {
   product: string;
   ai_ae: string;
   manager_name: string;
+  region: string;
+  segment: string;
   diff_type: 'category' | 'arr' | 'date';
   vp_value: string;
   ais_value: string;
+  opp_arr: number;
+  ais_arr: number;
+  close_date: string;
   arr_delta?: number;
   days_delta?: number;
 }

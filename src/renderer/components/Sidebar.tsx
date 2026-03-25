@@ -8,6 +8,7 @@ const links = [
   { to: '/pipeline',           label: 'Pipeline',            icon: '📈' },
   { to: '/closed-won',         label: 'Closed Won',          icon: '✅' },
   { to: '/analytics',          label: 'Analytics',           icon: '🔍' },
+  { to: '/weekly-trends',      label: 'What Changed?',       icon: '📊' },
   { to: '/dealia',             label: 'AskDealia',           icon: '✨' },
   { to: '/history',            label: 'History',             icon: '🔔' },
   { to: '/settings',           label: 'Settings',            icon: '⚙️' },

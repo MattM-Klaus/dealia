@@ -13,20 +13,30 @@ import {
   getNotificationLog,
   getForecastOpps,
   getClosedWonOpps,
+  updateClosedWonBookings,
   updateForecastAisField,
   getAnalyticsData,
   getQuotas,
   upsertQuota,
   deleteQuota,
   setForecastTopDeal,
+  deleteForecastOpp,
+  toggleExcludeFromAnalysis,
+  getExcludedDealIds,
   logImport,
   getImportHistory,
+  getSnapshotAtDate,
+  getSnapshotsBetweenDates,
+  getAllSnapshots,
+  deleteSnapshot,
+  snapshotCurrentState,
+  getPipelineSnapshots,
 } from './database';
 import type { AisForecast, ContactStatus } from '../shared/types';
 import { sendTestNotification } from './slack';
 import { runRenewalCheck } from './scheduler';
 import { importCsvFile } from './csv-import';
-import { importForecastCsv, importClosedWonCsv } from './forecast-import';
+import { importForecastCsv, importClosedWonCsv, importHistoricalCsv, importHistoricalClosedWonCsv } from './forecast-import';
 import { syncFromTableau } from './tableau-api';
 import type { AccountFormData, AppSettings } from '../shared/types';
 
@@ -111,6 +121,7 @@ export function registerIpcHandlers(): void {
   // Forecast
   ipcMain.handle('forecast:getOpps', () => getForecastOpps());
   ipcMain.handle('forecast:getClosedWon', () => getClosedWonOpps());
+  ipcMain.handle('forecast:getPipelineSnapshots', () => getPipelineSnapshots());
 
   ipcMain.handle('forecast:importPipeline', (_event, filePath: string) => {
     try {
@@ -147,6 +158,13 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('forecast:importClosedWon', (_event, filePath: string) => importClosedWonCsv(filePath));
   ipcMain.handle('analytics:getData', () => getAnalyticsData());
+  ipcMain.handle('analytics:getHistoricalState', (_event, asOfDate: string) => getSnapshotAtDate(asOfDate));
+  ipcMain.handle('analytics:getSnapshotsBetweenDates', (_event, fromDate: string, toDate: string) => getSnapshotsBetweenDates(fromDate, toDate));
+  ipcMain.handle('analytics:getAllSnapshots', () => getAllSnapshots());
+  ipcMain.handle('analytics:deleteSnapshot', (_event, importedAt: string) => { deleteSnapshot(importedAt); return { ok: true }; });
+  ipcMain.handle('analytics:snapshotCurrentState', () => snapshotCurrentState());
+  ipcMain.handle('forecast:importHistorical', (_event, filePath: string, customDate: string) => importHistoricalCsv(filePath, customDate));
+  ipcMain.handle('forecast:importHistoricalClosedWon', (_event, filePath: string, customDate: string) => importHistoricalClosedWonCsv(filePath, customDate));
 
   // Tableau sync
   ipcMain.handle('tableau:sync', async () => {
@@ -251,6 +269,11 @@ ${context}`;
     return { ok: true };
   });
 
+  ipcMain.handle('forecast:deleteOpp', (_event, id: number) => {
+    deleteForecastOpp(id);
+    return { ok: true };
+  });
+
   ipcMain.handle(
     'forecast:updateAisField',
     (_event, id: number, field: 'ais_forecast' | 'ais_arr' | 'ais_close_date', value: AisForecast | number | string | null) => {
@@ -258,6 +281,21 @@ ${context}`;
       return { ok: true };
     },
   );
+
+  ipcMain.handle('forecast:updateClosedWonBookings', (_event, id: number, editedBookings: number | null) => {
+    updateClosedWonBookings(id, editedBookings);
+    return { ok: true };
+  });
+
+  ipcMain.handle('forecast:toggleExcludeFromAnalysis', (_event, oppId: string, exclude: boolean) => {
+    toggleExcludeFromAnalysis(oppId, exclude);
+    return { ok: true };
+  });
+
+  ipcMain.handle('forecast:getExcludedDealIds', () => {
+    const excludedSet = getExcludedDealIds();
+    return Array.from(excludedSet);
+  });
 
   // Import History
   ipcMain.handle('importHistory:getAll', () => getImportHistory());
@@ -272,5 +310,44 @@ ${context}`;
 
     await shell.openPath(backupPath);
     return { ok: true };
+  });
+
+  // PDF Export
+  ipcMain.handle('pdf:export', async (event, defaultFilename: string) => {
+    try {
+      // Show save dialog
+      const result = await dialog.showSaveDialog({
+        title: 'Export to PDF',
+        defaultPath: defaultFilename,
+        filters: [{ name: 'PDF Files', extensions: ['pdf'] }],
+      });
+
+      if (result.canceled || !result.filePath) {
+        return { success: false, canceled: true };
+      }
+
+      // Generate PDF from current page
+      const pdfData = await event.sender.printToPDF({
+        printBackground: true,
+        pageSize: 'Letter',
+        margins: {
+          top: 0.5,
+          bottom: 0.5,
+          left: 0.5,
+          right: 0.5,
+        },
+      });
+
+      // Save PDF to file
+      fs.writeFileSync(result.filePath, pdfData);
+
+      // Open the PDF after saving
+      await shell.openPath(result.filePath);
+
+      return { success: true, filePath: result.filePath };
+    } catch (err: any) {
+      console.error('[pdf:export] Error:', err);
+      return { success: false, error: err.message };
+    }
   });
 }

@@ -38,6 +38,35 @@ function pct(num: number, denom: number): string {
   return `${Math.round((num / denom) * 100)}%`;
 }
 
+function countUniqueOpps(list: ForecastOpp[]): number {
+  return new Set(list.map((o) => o.crm_opportunity_id)).size;
+}
+
+function quarterToDateRange(quarter: string): string {
+  const match = quarter.match(/(\d{4})Q(\d)/);
+  if (!match) return quarter;
+  const fiscalYear = parseInt(match[1]);
+  const q = parseInt(match[2]);
+
+  // Fiscal year starts Feb 1, so FY27 Q1 = Feb 1, 2026 - Apr 30, 2026
+  const calendarYear = q === 4 ? fiscalYear : fiscalYear - 1;
+
+  const ranges = {
+    1: { start: 'Feb 1', end: 'Apr 30', year: calendarYear },
+    2: { start: 'May 1', end: 'Jul 31', year: calendarYear },
+    3: { start: 'Aug 1', end: 'Oct 31', year: calendarYear },
+    4: { start: 'Nov 1', end: 'Jan 31', startYear: calendarYear, endYear: fiscalYear },
+  };
+
+  const range = ranges[q as keyof typeof ranges];
+  if (!range) return quarter;
+
+  if (q === 4) {
+    return `${range.start}, ${range.startYear} - ${range.end}, ${range.endYear}`;
+  }
+  return `${range.start} - ${range.end}, ${range.year}`;
+}
+
 // ── Constants ──────────────────────────────────────────────────
 
 const CHANGE_LABELS: Record<ChangeType, string> = {
@@ -86,7 +115,7 @@ function productClass(p: string): string {
 
 const PRODUCTS = ['AI Agents', 'Copilot', 'QA', 'AI Expert', 'WEM'];
 
-type PageTab = 'overview' | 'changes' | 'executive';
+type PageTab = 'overview' | 'executive';
 type ChangesTab = 'all' | 'alerts' | 'arr' | 'dates' | 'stages' | 'forecast' | 'new_dropped';
 
 const CHANGE_TABS: { id: ChangesTab; label: string }[] = [
@@ -159,7 +188,7 @@ export default function Analytics() {
         </div>
         {/* Page-level tabs */}
         <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm">
-          {(['overview', 'changes', 'executive'] as PageTab[]).map((t) => (
+          {(['overview', 'executive'] as PageTab[]).map((t) => (
             <button
               key={t}
               onClick={() => setPageTab(t)}
@@ -169,7 +198,7 @@ export default function Analytics() {
                   : 'bg-white text-gray-500 hover:bg-gray-50'
               }`}
             >
-              {t === 'overview' ? 'CRO Overview' : t === 'changes' ? 'What Changed?' : 'Executive Summary'}
+              {t === 'overview' ? 'CRO Overview' : 'Executive Summary'}
             </button>
           ))}
         </div>
@@ -192,29 +221,6 @@ export default function Analytics() {
             setRegionFilter={setRegionFilterOv}
             segmentFilter={segmentFilterOv}
             setSegmentFilter={setSegmentFilterOv}
-          />
-        : pageTab === 'changes'
-        ? <ChangesTab
-            data={data}
-            opps={opps}
-            tab={changesTab}
-            setTab={setChangesTab}
-            aiAeFilter={aiAeFilter}
-            setAiAeFilter={setAiAeFilter}
-            managerFilter={managerFilter}
-            setManagerFilter={setManagerFilter}
-            regionFilter={regionFilter}
-            setRegionFilter={setRegionFilter}
-            segmentFilter={segmentFilter}
-            setSegmentFilter={setSegmentFilter}
-            importFilter={importFilter}
-            setImportFilter={setImportFilter}
-            chDatePreset={chDatePreset}
-            setChDatePreset={setChDatePreset}
-            chCustomFrom={chCustomFrom}
-            setChCustomFrom={setChCustomFrom}
-            chCustomTo={chCustomTo}
-            setChCustomTo={setChCustomTo}
           />
         : <ExecutiveSummaryTab
             changes={data?.changes ?? []}
@@ -317,7 +323,7 @@ function OverviewTab({
   const aisMostLikely  = filteredOpps.filter((o) => o.ais_forecast === 'Most Likely').reduce((s, o) => s + arrOf(o), 0);
   const aisBestCase    = filteredOpps.filter((o) => o.ais_forecast === 'Best Case').reduce((s, o) => s + arrOf(o), 0);
   const aisRemaining   = filteredOpps.filter((o) => o.ais_forecast === 'Remaining Pipe').reduce((s, o) => s + arrOf(o), 0);
-  const totalCW        = filteredCW.reduce((s, o) => s + o.bookings, 0);
+  const totalCW        = filteredCW.reduce((s, o) => s + (o.edited_bookings ?? o.bookings), 0);
   const uniqueCWDeals  = new Set(filteredCW.map((o) => o.crm_opportunity_id)).size;
   const totalTarget    = quotas
     .filter((q) => {
@@ -340,7 +346,7 @@ function OverviewTab({
     const aeCW     = filteredCW.filter((o) => o.ai_ae === ae);
     const quotaObj = quotas.find((q) => q.ai_ae === ae);
     const target   = getTarget(quotaObj);
-    const cwTotal  = aeCW.reduce((s, o) => s + o.bookings, 0);
+    const cwTotal  = aeCW.reduce((s, o) => s + (o.edited_bookings ?? o.bookings), 0);
     const commit   = aeOpps.filter((o) => o.ais_forecast === 'Commit').reduce((s, o) => s + arrOf(o), 0);
     const ml       = aeOpps.filter((o) => o.ais_forecast === 'Most Likely').reduce((s, o) => s + arrOf(o), 0);
     const pipeline = aeOpps.reduce((s, o) => s + arrOf(o), 0);
@@ -391,7 +397,7 @@ function OverviewTab({
   const productCW = PRODUCTS.map((p) => {
     const rows = filteredCW.filter((o) => o.product.toLowerCase() === p.toLowerCase());
     const uniqueDeals = new Set(rows.map((o) => o.crm_opportunity_id)).size;
-    const bookings = rows.reduce((s, o) => s + o.bookings, 0);
+    const bookings = rows.reduce((s, o) => s + (o.edited_bookings ?? o.bookings), 0);
     return { product: p, deals: uniqueDeals, bookings, avg: uniqueDeals > 0 ? bookings / uniqueDeals : 0 };
   });
 
@@ -404,7 +410,7 @@ function OverviewTab({
       cwOppMap[o.crm_opportunity_id] = { account_name: o.account_name, ai_ae: o.ai_ae, close_date: o.close_date, products: [], bookings: 0 };
     }
     cwOppMap[o.crm_opportunity_id].products.push(o.product);
-    cwOppMap[o.crm_opportunity_id].bookings += o.bookings;
+    cwOppMap[o.crm_opportunity_id].bookings += (o.edited_bookings ?? o.bookings);
   });
   const top10CW = Object.values(cwOppMap).sort((a, b) => b.bookings - a.bookings).slice(0, 10);
 
@@ -439,7 +445,7 @@ function OverviewTab({
     .forEach((o) => {
       const q = toCloseQuarter(o.close_date) || 'Unknown';
       if (!cwQtrMap[q]) cwQtrMap[q] = { bookings: 0, deals: new Set() };
-      cwQtrMap[q].bookings += o.bookings;
+      cwQtrMap[q].bookings += (o.edited_bookings ?? o.bookings);
       cwQtrMap[q].deals.add(o.crm_opportunity_id);
     });
   const cwByQuarter = Object.entries(cwQtrMap)
@@ -450,7 +456,7 @@ function OverviewTab({
     const rows = closedWon
       .filter((o) => (managerFilter.size === 0 || managerFilter.has(o.manager_name)) && o.product.toLowerCase() === p.toLowerCase());
     const uniqueDeals = new Set(rows.map((o) => o.crm_opportunity_id)).size;
-    const bookings = rows.reduce((s, o) => s + o.bookings, 0);
+    const bookings = rows.reduce((s, o) => s + (o.edited_bookings ?? o.bookings), 0);
     return { product: p, deals: uniqueDeals, bookings, avg: uniqueDeals > 0 ? bookings / uniqueDeals : 0 };
   });
 
@@ -485,7 +491,7 @@ function OverviewTab({
           <BigCard label="AIS Most Likely" value={fmtDollar(aisMostLikely)} sub={`${pct(aisMostLikely, totalPipeline)} of pipe`} color="yellow" />
           <BigCard label="AIS Best Case" value={fmtDollar(aisBestCase)} sub={`${pct(aisBestCase, totalPipeline)} of pipe`} color="orange" />
           <BigCard label="Remaining Pipe" value={fmtDollar(aisRemaining)} sub="no forecast assigned" color="gray" />
-          <BigCard label="Total Pipeline" value={fmtDollar(totalPipeline)} sub={`${filteredOpps.length} opps`} color="gray" />
+          <BigCard label="Total Pipeline" value={fmtDollar(totalPipeline)} sub={`${countUniqueOpps(filteredOpps)} opps`} color="gray" />
         </div>
       </Section>
 
@@ -1052,7 +1058,31 @@ function EmptyState({ text }: { text: string }) {
   return <p className="text-xs text-gray-400 italic py-2">{text}</p>;
 }
 
-function ForecastDifferencesSection({ differences }: { differences: ForecastDifference[] }) {
+function ForecastDifferencesSection({
+  differences,
+  regionFilter,
+  managerFilter,
+  segmentFilter,
+  aiAeFilter,
+  snapshotStart,
+  snapshotEnd,
+  liveOpps,
+  closedWon,
+  dateFrom,
+  dateTo,
+}: {
+  differences: ForecastDifference[];
+  regionFilter: Set<string>;
+  managerFilter: Set<string>;
+  segmentFilter: Set<string>;
+  aiAeFilter: Set<string>;
+  snapshotStart: ForecastOpp[] | null;
+  snapshotEnd: ForecastOpp[] | null;
+  liveOpps: ForecastOpp[];
+  closedWon: ClosedWonOpp[];
+  dateFrom: string;
+  dateTo: string;
+}) {
   const [expanded, setExpanded] = useState(false);
 
   // Safety check
@@ -1060,10 +1090,19 @@ function ForecastDifferencesSection({ differences }: { differences: ForecastDiff
     return null;
   }
 
+  // Apply filters
+  const filteredDifferences = differences.filter(d => {
+    if (regionFilter.size > 0 && !regionFilter.has(d.region ?? '')) return false;
+    if (managerFilter.size > 0 && !managerFilter.has(d.manager_name ?? '')) return false;
+    if (segmentFilter.size > 0 && !segmentFilter.has(d.segment ?? '')) return false;
+    if (aiAeFilter.size > 0 && !aiAeFilter.has(d.ai_ae ?? '')) return false;
+    return true;
+  });
+
   // Calculate summary stats
-  const categoryDiffs = differences.filter(d => d?.diff_type === 'category');
-  const arrDiffs = differences.filter(d => d?.diff_type === 'arr');
-  const dateDiffs = differences.filter(d => d?.diff_type === 'date');
+  const categoryDiffs = filteredDifferences.filter(d => d?.diff_type === 'category');
+  const arrDiffs = filteredDifferences.filter(d => d?.diff_type === 'arr');
+  const dateDiffs = filteredDifferences.filter(d => d?.diff_type === 'date');
 
   // Category breakdown
   const moreConservative = categoryDiffs.filter(d => {
@@ -1086,40 +1125,158 @@ function ForecastDifferencesSection({ differences }: { differences: ForecastDiff
   const pulledIn = dateDiffs.filter(d => (d.days_delta || 0) < 0).length;
   const avgDaysDelta = dateDiffs.length > 0 ? Math.round(dateDiffs.reduce((sum, d) => sum + (d.days_delta || 0), 0) / dateDiffs.length) : 0;
 
+  // ARR by forecast category - calculate delta between AIS and VP
+  const categories = ['Commit', 'Most Likely', 'Best Case', 'Remaining Pipe'];
+  const categoryDeltas: Record<string, { ais: number; vp: number; delta: number; count: number }> = {};
+
+  categories.forEach(cat => {
+    // AIS total: sum of ais_arr where ais_value = this category
+    const aisTotal = filteredDifferences
+      .filter(d => d.ais_value === cat)
+      .reduce((sum, d) => sum + d.ais_arr, 0);
+
+    // VP total: sum of opp_arr where vp_value = this category
+    const vpTotal = filteredDifferences
+      .filter(d => d.vp_value === cat)
+      .reduce((sum, d) => sum + d.opp_arr, 0);
+
+    // Count: how many opps involve this category (either AIS or VP)
+    const count = new Set([
+      ...filteredDifferences.filter(d => d.ais_value === cat).map(d => d.crm_opportunity_id),
+      ...filteredDifferences.filter(d => d.vp_value === cat).map(d => d.crm_opportunity_id),
+    ]).size;
+
+    categoryDeltas[cat] = {
+      ais: aisTotal,
+      vp: vpTotal,
+      delta: aisTotal - vpTotal,
+      count,
+    };
+  });
+
+  // Calculate Deal Backed and Closed Won deltas from snapshots
+  const passesFilters = (o: { region?: string; manager_name?: string; segment?: string; ai_ae?: string }) => {
+    if (regionFilter.size > 0 && !regionFilter.has(o.region ?? '')) return false;
+    if (managerFilter.size > 0 && !managerFilter.has(o.manager_name ?? '')) return false;
+    if (segmentFilter.size > 0 && !segmentFilter.has(o.segment ?? '')) return false;
+    if (aiAeFilter.size > 0 && !aiAeFilter.has(o.ai_ae ?? '')) return false;
+    return true;
+  };
+
+  // CW that closed in period - always calculate this regardless of snapshots
+  const cwInPeriod = closedWon
+    .filter(o => o.close_date >= dateFrom && o.close_date <= dateTo && passesFilters(o))
+    .reduce((sum, o) => sum + (o.edited_bookings ?? o.bookings), 0);
+
+  let dealBackedDelta = 0;
+  let closedWonDelta = cwInPeriod; // Always show total CW for the period
+
+  if (snapshotStart && (snapshotEnd || liveOpps)) {
+    // Calculate start state (Commit + ML)
+    const startCommit = snapshotStart.filter(o => passesFilters(o) && o.ais_forecast === 'Commit').reduce((sum, o) => sum + (o.ais_arr ?? o.product_arr_usd), 0);
+    const startML = snapshotStart.filter(o => passesFilters(o) && o.ais_forecast === 'Most Likely').reduce((sum, o) => sum + (o.ais_arr ?? o.product_arr_usd), 0);
+    const startDealBacked = startCommit + startML;
+
+    // Calculate end state (Commit + ML) - use live data if dateTo is today, otherwise use snapshot
+    const today = new Date().toISOString().split('T')[0];
+    const effectiveEndOpps = dateTo >= today ? liveOpps : (snapshotEnd || liveOpps);
+    const endCommit = effectiveEndOpps.filter(o => passesFilters(o) && o.ais_forecast === 'Commit').reduce((sum, o) => sum + (o.ais_arr ?? o.product_arr_usd), 0);
+    const endML = effectiveEndOpps.filter(o => passesFilters(o) && o.ais_forecast === 'Most Likely').reduce((sum, o) => sum + (o.ais_arr ?? o.product_arr_usd), 0);
+    const endDealBacked = endCommit + endML;
+
+    // Deal Backed delta = (end - start) + CW
+    dealBackedDelta = (endDealBacked - startDealBacked) + cwInPeriod;
+  }
+
   const oppSfdcUrl = (oppId: string) => `https://zendesk.lightning.force.com/lightning/r/Opportunity/${oppId}/view`;
 
+  const dateRangeLabel = dateFrom && dateTo ? ` (${fmtDate(dateFrom)} - ${fmtDate(dateTo)})` : '';
+
   return (
-    <Section title="Forecast Differences" emoji="🎯">
-      <div className="grid grid-cols-3 gap-3 mb-4">
+    <Section title={`Forecast Differences${dateRangeLabel}`} emoji="🎯">
+      {/* Summary tiles */}
+      <div className="grid grid-cols-5 gap-3 mb-4">
         <BigCard
-          label="Category Overrides"
+          label="AIS Deal Backed Δ"
+          value={dealBackedDelta === 0 ? '—' : `${dealBackedDelta > 0 ? '+' : ''}${fmtDollar(Math.abs(dealBackedDelta))}`}
+          sub="CW + Commit + ML change"
+          color={dealBackedDelta > 0 ? 'emerald' : dealBackedDelta < 0 ? 'orange' : 'gray'}
+        />
+        <BigCard
+          label="Closed Won"
+          value={closedWonDelta === 0 ? '—' : fmtDollar(closedWonDelta)}
+          sub="Deals closed in period"
+          color={closedWonDelta > 0 ? 'green' : 'gray'}
+        />
+        <BigCard
+          label="AIS Category Overrides"
           value={String(categoryDiffs.length)}
           sub={categoryDiffs.length > 0 ? `↓ ${moreConservative} conservative, ↑ ${moreOptimistic} optimistic` : 'No overrides'}
           color="blue"
         />
         <BigCard
-          label="ARR Adjustments"
+          label="AIS ARR Adjustments"
           value={String(arrDiffs.length)}
           sub={arrDiffs.length > 0 ? `Avg: ${fmtCurrency(avgArrChange)} | Total: ${fmtCurrency(totalArrDelta)}` : 'No adjustments'}
-          color="green"
+          color="gray"
         />
         <BigCard
-          label="Date Changes"
+          label="AIS Date Changes"
           value={String(dateDiffs.length)}
           sub={dateDiffs.length > 0 ? `⏰ ${pushedOut} pushed, ⏩ ${pulledIn} pulled in | Avg: ${avgDaysDelta > 0 ? '+' : ''}${avgDaysDelta}d` : 'No changes'}
           color="orange"
         />
       </div>
 
-      {differences.length === 0 ? (
-        <EmptyState text="No forecast differences — AIS team aligned with VP forecasts." />
+      {/* Forecast category breakdown */}
+      <div className="grid grid-cols-4 gap-3 mb-4">
+        <div className="bg-gray-50 rounded-xl border border-gray-100 px-4 py-3">
+          <p className="text-xs text-gray-400 mb-1">Commit</p>
+          <p className={`text-lg font-bold ${categoryDeltas['Commit'].delta >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+            {categoryDeltas['Commit'].delta > 0 ? '+' : categoryDeltas['Commit'].delta < 0 ? '-' : ''}{fmtCurrencyAbs(categoryDeltas['Commit'].delta)}
+          </p>
+          <p className="text-xs text-gray-400 mt-0.5">
+            AIS vs VP | {categoryDeltas['Commit'].count} opp{categoryDeltas['Commit'].count !== 1 ? 's' : ''}
+          </p>
+        </div>
+        <div className="bg-gray-50 rounded-xl border border-gray-100 px-4 py-3">
+          <p className="text-xs text-gray-400 mb-1">Most Likely</p>
+          <p className={`text-lg font-bold ${categoryDeltas['Most Likely'].delta >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+            {categoryDeltas['Most Likely'].delta > 0 ? '+' : categoryDeltas['Most Likely'].delta < 0 ? '-' : ''}{fmtCurrencyAbs(categoryDeltas['Most Likely'].delta)}
+          </p>
+          <p className="text-xs text-gray-400 mt-0.5">
+            AIS vs VP | {categoryDeltas['Most Likely'].count} opp{categoryDeltas['Most Likely'].count !== 1 ? 's' : ''}
+          </p>
+        </div>
+        <div className="bg-gray-50 rounded-xl border border-gray-100 px-4 py-3">
+          <p className="text-xs text-gray-400 mb-1">Best Case</p>
+          <p className={`text-lg font-bold ${categoryDeltas['Best Case'].delta >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+            {categoryDeltas['Best Case'].delta > 0 ? '+' : categoryDeltas['Best Case'].delta < 0 ? '-' : ''}{fmtCurrencyAbs(categoryDeltas['Best Case'].delta)}
+          </p>
+          <p className="text-xs text-gray-400 mt-0.5">
+            AIS vs VP | {categoryDeltas['Best Case'].count} opp{categoryDeltas['Best Case'].count !== 1 ? 's' : ''}
+          </p>
+        </div>
+        <div className="bg-gray-50 rounded-xl border border-gray-100 px-4 py-3">
+          <p className="text-xs text-gray-400 mb-1">Remaining Pipe</p>
+          <p className={`text-lg font-bold ${categoryDeltas['Remaining Pipe'].delta >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+            {categoryDeltas['Remaining Pipe'].delta > 0 ? '+' : categoryDeltas['Remaining Pipe'].delta < 0 ? '-' : ''}{fmtCurrencyAbs(categoryDeltas['Remaining Pipe'].delta)}
+          </p>
+          <p className="text-xs text-gray-400 mt-0.5">
+            AIS vs VP | {categoryDeltas['Remaining Pipe'].count} opp{categoryDeltas['Remaining Pipe'].count !== 1 ? 's' : ''}
+          </p>
+        </div>
+      </div>
+
+      {filteredDifferences.length === 0 ? (
+        <EmptyState text="No forecast differences match current filters." />
       ) : (
         <>
           <button
             onClick={() => setExpanded(!expanded)}
             className="text-sm text-blue-600 hover:text-blue-800 underline mb-3"
           >
-            {expanded ? '▼ Hide details' : `▶ Show ${differences.length} difference${differences.length === 1 ? '' : 's'}`}
+            {expanded ? '▼ Hide details' : `▶ Show ${filteredDifferences.length} difference${filteredDifferences.length === 1 ? '' : 's'}`}
           </button>
 
           {expanded && (
@@ -1130,54 +1287,83 @@ function ForecastDifferencesSection({ differences }: { differences: ForecastDiff
                     <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500">Account</th>
                     <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500">Product</th>
                     <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500">AI AE</th>
+                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500">Close Date</th>
+                    <th className="text-right px-4 py-2.5 text-xs font-semibold text-gray-500">Opp ARR</th>
+                    <th className="text-right px-4 py-2.5 text-xs font-semibold text-gray-500">AIS ARR</th>
                     <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500">Type</th>
-                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500">VP → AIS</th>
+                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500">VP Forecast</th>
+                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500">AIS Forecast</th>
                     <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500">SFDC</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {differences.map((diff, idx) => (
-                    <tr key={idx} className="hover:bg-gray-50">
-                      <td className="px-4 py-2.5 text-gray-900 font-medium">{diff.account_name}</td>
-                      <td className="px-4 py-2.5">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${productClass(diff.product)}`}>
-                          {diff.product}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2.5 text-gray-600 text-xs">{diff.ai_ae || '—'}</td>
-                      <td className="px-4 py-2.5">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                          diff.diff_type === 'category' ? 'bg-blue-100 text-blue-800' :
-                          diff.diff_type === 'arr' ? 'bg-green-100 text-green-800' :
-                          'bg-orange-100 text-orange-800'
-                        }`}>
-                          {diff.diff_type === 'category' ? 'Category' : diff.diff_type === 'arr' ? 'ARR' : 'Date'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2.5 text-gray-600 text-xs">
-                        {diff.diff_type === 'arr' && diff.arr_delta != null ? (
-                          <span className={diff.arr_delta > 0 ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
-                            {diff.vp_value} → {diff.ais_value} ({diff.arr_delta > 0 ? '+' : ''}{fmtCurrencyAbs(diff.arr_delta)})
+                  {filteredDifferences.map((diff, idx) => {
+                    const forecastColors: Record<string, string> = {
+                      'Commit': 'bg-green-600 text-white',
+                      'Best Case': 'bg-blue-600 text-white',
+                      'Most Likely': 'bg-yellow-500 text-white',
+                      'Remaining Pipe': 'bg-gray-400 text-white',
+                    };
+
+                    return (
+                      <tr key={idx} className="hover:bg-gray-50">
+                        <td className="px-4 py-2.5 text-gray-900 font-medium">{diff.account_name}</td>
+                        <td className="px-4 py-2.5">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${productClass(diff.product)}`}>
+                            {diff.product}
                           </span>
-                        ) : diff.diff_type === 'date' && diff.days_delta != null ? (
-                          <span className={diff.days_delta > 0 ? 'text-orange-600' : 'text-blue-600'}>
-                            {fmtDate(diff.vp_value)} → {fmtDate(diff.ais_value)} ({diff.days_delta > 0 ? '+' : ''}{diff.days_delta}d)
+                        </td>
+                        <td className="px-4 py-2.5 text-gray-600 text-xs">{diff.ai_ae || '—'}</td>
+                        <td className="px-4 py-2.5 text-gray-600 text-xs">{fmtDate(diff.close_date)}</td>
+                        <td className="px-4 py-2.5 text-right text-gray-900">{fmtCurrencyAbs(diff.opp_arr)}</td>
+                        <td className="px-4 py-2.5 text-right font-semibold text-gray-900">{fmtCurrencyAbs(diff.ais_arr)}</td>
+                        <td className="px-4 py-2.5">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                            diff.diff_type === 'category' ? 'bg-blue-100 text-blue-800' :
+                            diff.diff_type === 'arr' ? 'bg-green-100 text-green-800' :
+                            'bg-orange-100 text-orange-800'
+                          }`}>
+                            {diff.diff_type === 'category' ? 'Category' : diff.diff_type === 'arr' ? 'ARR' : 'Date'}
                           </span>
-                        ) : (
-                          <span>{diff.vp_value} → {diff.ais_value}</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-2.5 text-center">
-                        <a
-                          href={oppSfdcUrl(diff.crm_opportunity_id)}
-                          onClick={(e) => { e.preventDefault(); window.api.openExternal(oppSfdcUrl(diff.crm_opportunity_id)); }}
-                          className="text-blue-600 hover:text-blue-800 text-xs underline"
-                        >
-                          View
-                        </a>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          {diff.diff_type === 'category' ? (
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${forecastColors[diff.vp_value] || 'bg-gray-100 text-gray-600'}`}>
+                              {diff.vp_value}
+                            </span>
+                          ) : diff.diff_type === 'arr' ? (
+                            <span className="text-xs text-gray-600">{diff.vp_value}</span>
+                          ) : (
+                            <span className="text-xs text-gray-600">{fmtDate(diff.vp_value)}</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          {diff.diff_type === 'category' ? (
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${forecastColors[diff.ais_value] || 'bg-gray-100 text-gray-600'}`}>
+                              {diff.ais_value}
+                            </span>
+                          ) : diff.diff_type === 'arr' ? (
+                            <span className={`text-xs font-medium ${diff.arr_delta && diff.arr_delta > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                              {diff.ais_value} {diff.arr_delta != null && `(${fmtCurrencyAbs(diff.arr_delta)})`}
+                            </span>
+                          ) : (
+                            <span className={`text-xs font-medium ${diff.days_delta && diff.days_delta > 0 ? 'text-orange-600' : 'text-blue-600'}`}>
+                              {fmtDate(diff.ais_value)} {diff.days_delta != null && `(${diff.days_delta > 0 ? '+' : ''}${diff.days_delta}d)`}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5 text-center">
+                          <a
+                            href={oppSfdcUrl(diff.crm_opportunity_id)}
+                            onClick={(e) => { e.preventDefault(); window.api.openExternal(oppSfdcUrl(diff.crm_opportunity_id)); }}
+                            className="text-blue-600 hover:text-blue-800 text-xs underline"
+                          >
+                            View
+                          </a>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1624,6 +1810,11 @@ function ExecutiveSummaryTab({
   const [arrFilter, setArrFilter]             = useState<'all' | '50k_plus'>('50k_plus');
   const [newOppFilter, setNewOppFilter]       = useState<'all' | '50k_plus'>('50k_plus');
 
+  // Historical snapshots state
+  const [snapshotStart, setSnapshotStart] = useState<ForecastOpp[] | null>(null);
+  const [snapshotEnd, setSnapshotEnd] = useState<ForecastOpp[] | null>(null);
+  const [useHistorical, setUseHistorical] = useState(true);
+
   // Compute date range
   const today = new Date().toISOString().split('T')[0];
   let dateFrom: string;
@@ -1650,6 +1841,20 @@ function ExecutiveSummaryTab({
     dateFrom = customFrom || today;
     dateTo   = customTo   || today;
   }
+
+  // Fetch historical snapshots when date range changes
+  useEffect(() => {
+    if (!useHistorical) {
+      setSnapshotStart(null);
+      setSnapshotEnd(null);
+      return;
+    }
+
+    window.api.getSnapshotsBetweenDates(dateFrom, dateTo).then(({ start, end }) => {
+      setSnapshotStart(start);
+      setSnapshotEnd(end);
+    });
+  }, [dateFrom, dateTo, useHistorical]);
 
   // Dropdown options
   const allRegions   = [...new Set([...opps.map((o) => o.region),   ...closedWon.map((o) => o.region)].filter(Boolean))].sort();
@@ -1693,6 +1898,7 @@ function ExecutiveSummaryTab({
   const oppCloseDateMap = new Map<string, string>();
   const oppTotalArrMap  = new Map<string, number>(); // crm_opportunity_id → total ARR across products
   const oppForecastMap  = new Map<string, string | null>(); // crm_opportunity_id → highest-ranked forecast
+  const oppAiAeMap      = new Map<string, string>(); // crm_opportunity_id → AI AE (first non-empty value)
   const forecastRank: Record<string, number> = { 'Commit': 3, 'Most Likely': 2, 'Best Case': 1, 'Remaining Pipe': 0 };
   for (const o of opps) {
     const key = `${o.crm_opportunity_id}::${o.product}`;
@@ -1705,6 +1911,15 @@ function ExecutiveSummaryTab({
     const existingRank = forecastRank[oppForecastMap.get(o.crm_opportunity_id) ?? ''] ?? -1;
     const newRank = forecastRank[forecast ?? ''] ?? -1;
     if (newRank > existingRank) oppForecastMap.set(o.crm_opportunity_id, forecast);
+    // Capture AI AE - prefer clean names (skip values that look like notes with " | " or are too long)
+    if (o.ai_ae) {
+      const isCleanName = o.ai_ae.length < 50 && !o.ai_ae.includes(' | ');
+      const existing = oppAiAeMap.get(o.crm_opportunity_id);
+      // Use this value if: (1) no existing value, (2) this is clean and existing isn't, or (3) this is shorter and both are clean
+      if (!existing || (isCleanName && existing.length > 50) || (isCleanName && existing.includes(' | '))) {
+        oppAiAeMap.set(o.crm_opportunity_id, o.ai_ae);
+      }
+    }
   }
 
   const getArr = (o: ForecastOpp) => o.ais_arr ?? o.product_arr_usd;
@@ -1718,20 +1933,22 @@ function ExecutiveSummaryTab({
       cwOppMap[o.crm_opportunity_id] = { account_name: o.account_name, ai_ae: o.ai_ae, close_date: o.close_date, products: [], bookings: 0 };
     }
     cwOppMap[o.crm_opportunity_id].products.push(o.product);
-    cwOppMap[o.crm_opportunity_id].bookings += o.bookings;
+    cwOppMap[o.crm_opportunity_id].bookings += (o.edited_bookings ?? o.bookings);
   });
   const cwOpps       = Object.values(cwOppMap).sort((a, b) => b.bookings - a.bookings);
-  const totalClosed  = filteredCW.reduce((s, o) => s + o.bookings, 0);
-  const bigCwOpps    = cwOpps.filter((o) => o.bookings >= 50_000);
+  const totalClosed  = filteredCW.reduce((s, o) => s + (o.edited_bookings ?? o.bookings), 0);
+  const bigCwOpps    = cwOpps.filter((o) => (o.edited_bookings ?? o.bookings) >= 50_000);
   const cwByProduct  = PRODUCTS.map((p) => {
     const rows = filteredCW.filter((o) => o.product.toLowerCase() === p.toLowerCase());
-    return { product: p, deals: new Set(rows.map((o) => o.crm_opportunity_id)).size, bookings: rows.reduce((s, o) => s + o.bookings, 0) };
+    return { product: p, deals: new Set(rows.map((o) => o.crm_opportunity_id)).size, bookings: rows.reduce((s, o) => s + (o.edited_bookings ?? o.bookings), 0) };
   }).filter((r) => r.deals > 0);
 
   // ── Section 2: What's Forecast This Quarter ───────────────────
-  // Always scoped to the current quarter — not affected by the date range picker
+  // Use historical snapshot only if looking at past dates; for today, always use live data
+  const effectiveOpps = useHistorical && snapshotEnd && dateTo < today ? snapshotEnd : opps;
+  const effectiveFilteredOpps = effectiveOpps.filter((o) => passesOtherFilters(o));
   const isBestCase = (o: ForecastOpp) => forecastType === 'ais' ? o.ais_forecast === 'Best Case' : o.vp_deal_forecast === 'Best Case';
-  const qtrOpps        = filteredOpps.filter((o) => toCloseQuarter(o.ais_close_date ?? o.close_date) === currentQuarter);
+  const qtrOpps        = effectiveFilteredOpps.filter((o) => toCloseQuarter(o.ais_close_date ?? o.close_date) === currentQuarter);
   const commitArr      = qtrOpps.filter(isCommit).reduce((s, o) => s + getArr(o), 0);
   const mlArr          = qtrOpps.filter(isML).reduce((s, o) => s + getArr(o), 0);
   const bestCaseArr    = qtrOpps.filter(isBestCase).reduce((s, o) => s + getArr(o), 0);
@@ -1739,7 +1956,7 @@ function ExecutiveSummaryTab({
   const totalQtrPipe   = qtrOpps.reduce((s, o) => s + getArr(o), 0);
   const qtrCWTotal     = closedWon
     .filter((o) => toCloseQuarter(o.close_date) === currentQuarter && passesOtherFilters(o))
-    .reduce((s, o) => s + o.bookings, 0);
+    .reduce((s, o) => s + (o.edited_bookings ?? o.bookings), 0);
   const dealBacked     = qtrCWTotal + commitArr + mlArr;
   const qtrNum         = parseInt((currentQuarter.match(/Q(\d)/) ?? [])[1] ?? '0');
   const totalQtrTarget = quotas
@@ -1752,6 +1969,46 @@ function ExecutiveSummaryTab({
       const t = qtrNum === 1 ? q.q1_target : qtrNum === 2 ? q.q2_target : qtrNum === 3 ? q.q3_target : qtrNum === 4 ? q.q4_target : 0;
       return s + (t || 0);
     }, 0);
+
+  // ── Section 2.5: Top Deals in the Pipe ───────────────────────
+  // Only show deals closing in the current quarter (same as "What's Forecast This Quarter")
+  const topDealsMap: Record<string, {
+    account_name: string;
+    ai_ae: string;
+    vp_close_date: string;
+    ais_close_date: string;
+    products: string[];
+    totalArr: number;
+    totalAisArr: number;
+    vp_forecast: string;
+    ais_forecast: string;
+    product_specialist_notes: string;
+  }> = {};
+
+  qtrOpps.forEach((o) => {
+    if (!topDealsMap[o.crm_opportunity_id]) {
+      topDealsMap[o.crm_opportunity_id] = {
+        account_name: o.account_name,
+        ai_ae: o.ai_ae,
+        vp_close_date: o.close_date,
+        ais_close_date: o.ais_close_date ?? o.close_date,
+        products: [],
+        totalArr: 0,
+        totalAisArr: 0,
+        vp_forecast: o.vp_deal_forecast || '',
+        ais_forecast: o.ais_forecast || '',
+        product_specialist_notes: o.product_specialist_notes || '',
+      };
+    }
+    topDealsMap[o.crm_opportunity_id].products.push(o.product);
+    topDealsMap[o.crm_opportunity_id].totalArr += o.product_arr_usd;
+    topDealsMap[o.crm_opportunity_id].totalAisArr += o.ais_arr ?? o.product_arr_usd;
+  });
+
+  const topDeals = Object.entries(topDealsMap)
+    .map(([id, deal]) => ({ crm_opportunity_id: id, ...deal }))
+    .filter((d) => d.totalArr >= 100_000)
+    .sort((a, b) => b.totalArr - a.totalArr);
 
   // ── Section 3: What's Changed ─────────────────────────────────
   // Scope changes to selected quarter (dropped opps only appear in "all")
@@ -1789,7 +2046,7 @@ function ExecutiveSummaryTab({
           products: [c.product],
           totalArr: oppTotalArrMap.get(c.crm_opportunity_id) ?? parseFloat(c.new_value ?? '0'),
           closeDate: oppCloseDateMap.get(oppKey) ?? '',
-          ai_ae: c.ai_ae,
+          ai_ae: oppAiAeMap.get(c.crm_opportunity_id) ?? c.ai_ae,
           importedAt: c.imported_at,
           forecast: oppForecastMap.get(c.crm_opportunity_id) ?? null,
         });
@@ -1815,7 +2072,7 @@ function ExecutiveSummaryTab({
           products: [c.product],
           totalArr: oppTotalArrMap.get(id) ?? 0,
           netDelta: c.delta_numeric ?? 0,
-          ai_ae: c.ai_ae,
+          ai_ae: oppAiAeMap.get(id) ?? c.ai_ae,
           importedAt: c.imported_at,
           closeDate: oppCloseDateMap.get(`${id}::${c.product}`) ?? '',
           forecast: oppForecastMap.get(id) ?? null,
@@ -1833,51 +2090,52 @@ function ExecutiveSummaryTab({
       .sort((a, b) => b.netDelta - a.netDelta);
   })();
 
-  // Forecast upgrades: moved to Most Likely or Commit from a lower category
-  const forecastUpgrades = scopedChanges.filter((c) => {
-    if (c.change_type !== 'ais_forecast_changed') return false;
-    return (c.new_value === 'Most Likely' || c.new_value === 'Commit') &&
-      (c.old_value === 'Best Case' || c.old_value === 'Remaining Pipe' || !c.old_value);
-  });
-
   // ── Forecast category deltas ──────────────────────────────────
-  // Computes the net +/- for each AIS forecast bucket over the scoped period.
-  // Uses current opp ARR/forecast as a proxy; attributes changes to the current category.
+  // Calculate deltas by comparing historical snapshots
   const forecastDeltas = (() => {
     const scopeQtr = changesQtrScope === 'this_qtr' ? currentQuarter : changesQtrScope === 'next_qtr' ? nextQuarter : null;
-    const currentState = new Map<string, { arr: number; forecast: string | null }>();
-    for (const o of filteredOpps) {
-      if (scopeQtr && toCloseQuarter(o.ais_close_date ?? o.close_date) !== scopeQtr) continue;
-      currentState.set(`${o.crm_opportunity_id}::${o.product}`, { arr: o.ais_arr ?? o.product_arr_usd, forecast: o.ais_forecast });
-    }
-    const d = { commit: 0, ml: 0, bestCase: 0, remaining: 0, total: 0 };
-    const catKey = (v: string | null | undefined) =>
-      v === 'Commit' ? 'commit' : v === 'Most Likely' ? 'ml' : v === 'Best Case' ? 'bestCase' : v === 'Remaining Pipe' ? 'remaining' : null;
-    for (const c of scopedChanges) {
-      const state = currentState.get(`${c.crm_opportunity_id}::${c.product}`);
-      const arr = state?.arr ?? 0;
-      const currentCat = catKey(state?.forecast);
-      if (c.change_type === 'opp_added') {
-        if (currentCat) d[currentCat] += arr;
-        d.total += arr;
-      } else if (c.change_type === 'opp_dropped') {
-        d.total += c.delta_numeric ?? 0; // already negative
-      } else if (c.change_type === 'arr_up' || c.change_type === 'arr_down') {
-        if (currentCat) d[currentCat] += c.delta_numeric ?? 0;
-        d.total += c.delta_numeric ?? 0;
-      } else if (c.change_type === 'ais_forecast_changed') {
-        const oldCat = catKey(c.old_value);
-        const newCat = catKey(c.new_value);
-        if (oldCat !== newCat) {
-          if (oldCat) d[oldCat] -= arr;
-          if (newCat) d[newCat] += arr;
-        }
+
+    // Helper to categorize opps by forecast and sum ARR
+    const categorizeOpps = (opps: ForecastOpp[]) => {
+      const cats = { commit: 0, ml: 0, bestCase: 0, remaining: 0, total: 0 };
+      for (const o of opps) {
+        if (!passesOtherFilters(o)) continue;
+        if (scopeQtr && toCloseQuarter(o.ais_close_date ?? o.close_date) !== scopeQtr) continue;
+
+        const arr = o.ais_arr ?? o.product_arr_usd;
+        cats.total += arr;
+
+        if (o.ais_forecast === 'Commit') cats.commit += arr;
+        else if (o.ais_forecast === 'Most Likely') cats.ml += arr;
+        else if (o.ais_forecast === 'Best Case') cats.bestCase += arr;
+        else cats.remaining += arr;
       }
+      return cats;
+    };
+
+    // If we have snapshots, compare them directly
+    if (snapshotStart && snapshotEnd) {
+      const start = categorizeOpps(snapshotStart);
+      const end = categorizeOpps(snapshotEnd);
+
+      const delta = {
+        commit: end.commit - start.commit,
+        ml: end.ml - start.ml,
+        bestCase: end.bestCase - start.bestCase,
+        remaining: end.remaining - start.remaining,
+        total: end.total - start.total,
+      };
+
+      // Deal Backed = (change in Commit) + (change in ML) + (CW that closed in period)
+      // This accounts for: new opps added to Commit/ML, deals closing from Commit/ML to CW
+      const cwInPeriod = filteredCW.reduce((sum, o) => sum + (o.edited_bookings ?? o.bookings), 0);
+      const dealBacked = delta.commit + delta.ml + cwInPeriod;
+
+      return { ...delta, dealBacked };
     }
-    const periodCWDelta = filteredCW
-      .filter((o) => !scopeQtr || toCloseQuarter(o.close_date) === scopeQtr)
-      .reduce((s, o) => s + o.bookings, 0);
-    return { ...d, dealBacked: d.commit + d.ml + periodCWDelta };
+
+    // Fallback: no snapshots available, return zeros
+    return { commit: 0, ml: 0, bestCase: 0, remaining: 0, total: 0, dealBacked: 0 };
   })();
 
   const hasFilters = regionFilter.size > 0 || managerFilter.size > 0 || segmentFilter.size > 0 || aiAeFilter.size > 0;
@@ -1933,8 +2191,23 @@ function ExecutiveSummaryTab({
         )}
       </div>
 
+      {/* Historical mode indicator */}
+      {useHistorical && snapshotEnd && dateTo < today && (
+        <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-xl">
+          <div className="flex items-center gap-2">
+            <span className="text-2xl">📸</span>
+            <div>
+              <p className="text-sm font-semibold text-blue-900">Historical Snapshot Mode</p>
+              <p className="text-xs text-blue-700">
+                Showing pipeline state as of {dateTo}. Deltas calculated from {dateFrom} to {dateTo}.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Section 1: What's Forecast This Quarter ── */}
-      <Section title={`What's Forecast This Quarter (${currentQuarter})`} emoji="🎯">
+      <Section title={`What's Forecast This Quarter (${currentQuarter}: ${quarterToDateRange(currentQuarter)})`} emoji="🎯">
         <div className="grid grid-cols-3 gap-3 mb-3">
           <BigCard label="Target"      value={totalQtrTarget > 0 ? fmtDollar(totalQtrTarget) : '—'} sub={currentQuarter}               color="gray"    />
           <BigCard label="Deal Backed" value={fmtDollar(dealBacked)}                                sub="CW + Commit + Most Likely"    color="blue"    />
@@ -1945,17 +2218,17 @@ function ExecutiveSummaryTab({
           <BigCard label={forecastType === 'ais' ? 'AIS Most Likely'  : 'VP Most Likely'}  value={fmtDollar(mlArr)}        sub={`${pct(mlArr,       totalQtrPipe)} of pipe`} color="yellow"  />
           <BigCard label={forecastType === 'ais' ? 'AIS Best Case'    : 'VP Best Case'}    value={fmtDollar(bestCaseArr)}  sub={`${pct(bestCaseArr, totalQtrPipe)} of pipe`} color="orange"  />
           <BigCard label="Remaining Pipe"                                                   value={fmtDollar(remainingArr)} sub="no forecast assigned"                        color="gray"    />
-          <BigCard label="Total Pipeline"                                                   value={fmtDollar(totalQtrPipe)} sub={`${qtrOpps.length} opps`}                   color="gray"    />
+          <BigCard label="Total Pipeline"                                                   value={fmtDollar(totalQtrPipe)} sub={`${countUniqueOpps(qtrOpps)} opps`}                   color="gray"    />
         </div>
         {qtrOpps.length === 0 && <div className="mt-3"><EmptyState text={`No pipeline opps in ${currentQuarter}.`} /></div>}
       </Section>
 
       {/* ── Section 2: What's Closed ── */}
-      <Section title="What's Closed" emoji="✅">
+      <Section title={`What's Closed (${fmtDate(dateFrom)} - ${fmtDate(dateTo)})`} emoji="✅">
         <div className="grid grid-cols-3 gap-3 mb-4">
           <BigCard label="Total Closed ARR"  value={totalClosed > 0 ? fmtDollar(totalClosed) : '—'} sub={`${cwOpps.length} deals`} color="green" />
           <BigCard label="Deals Closed"      value={String(cwOpps.length)} sub={presetLabel} color="gray" />
-          <BigCard label="Deals ≥ $50K"      value={String(bigCwOpps.length)} sub={bigCwOpps.length > 0 ? fmtDollar(bigCwOpps.reduce((s, o) => s + o.bookings, 0)) : 'none'} color="blue" />
+          <BigCard label="Deals ≥ $50K"      value={String(bigCwOpps.length)} sub={bigCwOpps.length > 0 ? fmtDollar(bigCwOpps.reduce((s, o) => s + (o.edited_bookings ?? o.bookings), 0)) : 'none'} color="blue" />
         </div>
 
         {cwByProduct.length > 0 && (
@@ -2018,273 +2291,132 @@ function ExecutiveSummaryTab({
       </Section>
 
       {/* ── Section 2.5: Forecast Differences ── */}
-      <ForecastDifferencesSection differences={forecastDifferences} />
+      <ForecastDifferencesSection
+        differences={forecastDifferences}
+        regionFilter={regionFilter}
+        managerFilter={managerFilter}
+        segmentFilter={segmentFilter}
+        aiAeFilter={aiAeFilter}
+        snapshotStart={snapshotStart}
+        snapshotEnd={snapshotEnd}
+        liveOpps={opps}
+        closedWon={closedWon}
+        dateFrom={dateFrom}
+        dateTo={dateTo}
+      />
 
-      {/* ── Section 3: What's Changed ── */}
-      <Section title="What's Changed" emoji="🔄">
-        {/* Quarter scope toggle */}
-        <div className="flex items-center gap-2 mb-4">
-          <span className="text-xs text-gray-500 font-medium">Scope:</span>
-          <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm bg-white">
-            {(['this_qtr', 'next_qtr', 'all'] as const).map((s) => (
-              <button
-                key={s}
-                onClick={() => setChangesQtrScope(s)}
-                className={`px-3 py-1.5 font-medium transition-colors ${changesQtrScope === s ? 'bg-gray-900 text-white' : 'text-gray-500 hover:bg-gray-50'}`}
-              >
-                {s === 'this_qtr' ? `This Qtr (${currentQuarter})` : s === 'next_qtr' ? `Next Qtr (${nextQuarter})` : 'All Opps'}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {scopedChanges.length === 0 ? (
-          <EmptyState text={`No changes detected in this period (${presetLabel}). Upload a CSV to start tracking.`} />
+      {/* ── Section 2.6: Top Deals in the Pipe ── */}
+      <Section title={`Top Deals in the Pipe (${currentQuarter}: ${quarterToDateRange(currentQuarter)})`} emoji="💰">
+        {topDeals.length === 0 ? (
+          <EmptyState text="No deals over $100K in the pipeline." />
         ) : (
           <>
-            {/* Summary tiles */}
-            <div className="grid grid-cols-4 gap-3 mb-6">
-              <div className="bg-gray-50 rounded-xl border border-gray-100 px-4 py-3">
-                <p className="text-xs text-gray-400 mb-1">Opp Count</p>
-                <p className="text-base font-bold"><span className="text-emerald-700">+{addedChanges.length}</span>{' / '}<span className="text-red-600">-{droppedChanges.length}</span></p>
-                <p className="text-xs text-gray-400 mt-0.5">added / dropped</p>
-              </div>
-              <div className="bg-gray-50 rounded-xl border border-gray-100 px-4 py-3">
-                {(() => {
-                  const scopeQtr = changesQtrScope === 'this_qtr' ? currentQuarter : changesQtrScope === 'next_qtr' ? nextQuarter : null;
-                  const cwTotal = filteredCW
-                    .filter((o) => !scopeQtr || toCloseQuarter(o.close_date) === scopeQtr)
-                    .reduce((s, o) => s + o.bookings, 0);
-                  const cwDeals = new Set(filteredCW
-                    .filter((o) => !scopeQtr || toCloseQuarter(o.close_date) === scopeQtr)
-                    .map((o) => o.crm_opportunity_id)).size;
+            <p className="text-xs text-gray-500 mb-4">Showing deals over $100K ({topDeals.length} deals, {fmtDollar(topDeals.reduce((s, d) => s + d.totalArr, 0))} total)</p>
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-[10px] text-gray-400 border-b border-gray-100 font-semibold uppercase tracking-wide">
+                  <th className="text-left pb-2 pr-3">Account</th>
+                  <th className="text-left pb-2 px-2">Products</th>
+                  <th className="text-right pb-2 px-2">Total ARR</th>
+                  <th className="text-right pb-2 px-2">AIS ARR</th>
+                  <th className="text-left pb-2 px-2">VP Forecast</th>
+                  <th className="text-left pb-2 px-2">AIS Forecast</th>
+                  <th className="text-left pb-2 px-2">VP Close</th>
+                  <th className="text-left pb-2 px-2">AIS Close</th>
+                  <th className="text-left pb-2 px-2">AI AE</th>
+                  <th className="text-left pb-2 pl-2">Notes</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {topDeals.map((deal) => {
+                  const arrDiff = Math.abs(deal.totalArr - deal.totalAisArr) > 1000;
+                  const forecastDiff = deal.vp_forecast !== deal.ais_forecast;
+                  const dateDiff = deal.vp_close_date !== deal.ais_close_date;
+
                   return (
-                    <>
-                      <p className="text-xs text-gray-400 mb-1">Closed Won</p>
-                      <p className={`text-base font-bold ${cwTotal > 0 ? 'text-emerald-700' : 'text-gray-500'}`}>{cwTotal > 0 ? fmtDollar(cwTotal) : '—'}</p>
-                      <p className="text-xs text-gray-400 mt-0.5">{cwDeals > 0 ? `${cwDeals} deal${cwDeals !== 1 ? 's' : ''}` : 'none this period'}</p>
-                    </>
-                  );
-                })()}
-              </div>
-              <div className="bg-gray-50 rounded-xl border border-gray-100 px-4 py-3">
-                <p className="text-xs text-gray-400 mb-1">Date Pushes / Pulls</p>
-                <p className="text-base font-bold">
-                  <span className={datePushedList.length > 0 ? 'text-orange-600' : 'text-gray-700'}>{datePushedList.length}</span>
-                  {' / '}
-                  <span className="text-blue-600">{datePulledList.length}</span>
-                </p>
-                <p className="text-xs text-gray-400 mt-0.5">{longPushes.length > 0 ? `${longPushes.length} pushed 30+ days` : 'none pushed 30+ days'}</p>
-              </div>
-              <div className="bg-gray-50 rounded-xl border border-gray-100 px-4 py-3">
-                <p className="text-xs text-gray-400 mb-1">Pushed Out of Quarter</p>
-                <p className={`text-base font-bold ${pushedOutOfQtr.length > 0 ? 'text-red-600' : 'text-gray-700'}`}>{pushedOutOfQtr.length}</p>
-                <p className="text-xs text-gray-400 mt-0.5">crossed quarter boundary</p>
-              </div>
-            </div>
-
-            {/* Forecast category deltas */}
-            {(() => {
-              const fd = forecastDeltas;
-              const fmt = (v: number) => `${v >= 0 ? '+' : ''}${fmtDollar(Math.abs(v))}`;
-              const color = (v: number) => v > 0 ? 'text-emerald-700' : v < 0 ? 'text-red-600' : 'text-gray-500';
-              const tiles = [
-                { label: 'Deal Backed', value: fd.dealBacked, sub: 'CW + Commit + ML' },
-                { label: 'Commit',       value: fd.commit,     sub: 'AIS Commit' },
-                { label: 'Most Likely',  value: fd.ml,         sub: 'AIS Most Likely' },
-                { label: 'Best Case',    value: fd.bestCase,   sub: 'AIS Best Case' },
-                { label: 'Remaining',    value: fd.remaining,  sub: 'Remaining Pipe' },
-                { label: 'Total Pipe',   value: fd.total,      sub: 'All pipeline opps' },
-              ];
-              return (
-                <div className="grid grid-cols-6 gap-3 mb-6">
-                  {tiles.map((t) => (
-                    <div key={t.label} className="bg-gray-50 rounded-xl border border-gray-100 px-3 py-3">
-                      <p className="text-xs text-gray-400 mb-1 truncate">{t.label}</p>
-                      <p className={`text-sm font-bold ${color(t.value)}`}>{fmt(t.value)}</p>
-                      <p className="text-xs text-gray-400 mt-0.5 truncate">{t.sub}</p>
-                    </div>
-                  ))}
-                </div>
-              );
-            })()}
-
-            {/* New to Pipeline */}
-            {addedChanges.length > 0 && (
-              <div className="mb-6">
-                <div className="flex items-center gap-3 mb-2">
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                    New to Pipeline <span className="normal-case font-normal text-gray-400">({addedGrouped.length})</span>
-                  </p>
-                  <div className="flex rounded border border-gray-200 overflow-hidden text-xs bg-white">
-                    {(['all', '50k_plus'] as const).map((f) => (
-                      <button
-                        key={f}
-                        onClick={() => setNewOppFilter(f)}
-                        className={`px-2 py-0.5 font-medium transition-colors ${newOppFilter === f ? 'bg-gray-700 text-white' : 'text-gray-500 hover:bg-gray-50'}`}
-                      >
-                        {f === 'all' ? 'All' : '≥$50K'}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                {addedGrouped.length === 0 ? (
-                  <p className="text-xs text-gray-400 italic">No new opps ≥$50K in this period.</p>
-                ) : (
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-xs text-gray-400 border-b border-gray-100 font-semibold">
-                        <th className="text-left pb-2">Account</th>
-                        <th className="text-left pb-2">Products</th>
-                        <th className="text-right pb-2 pr-6">Total ARR</th>
-                        <th className="text-left pb-2">Forecast</th>
-                        <th className="text-left pb-2">Close</th>
-                        <th className="text-left pb-2">First Seen</th>
-                        <th className="text-left pb-2">AI AE</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-50">
-                      {addedGrouped.map((g) => (
-                        <tr key={g.crm_opportunity_id} className="hover:bg-gray-50">
-                          <td className="py-2">
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-medium text-gray-900">{g.account_name}</span>
-                              <button onClick={() => window.api.openExternal(`https://zendesk.lightning.force.com/lightning/r/Opportunity/${g.crm_opportunity_id}/view`)} className="text-blue-400 hover:text-blue-600 text-xs">↗</button>
-                            </div>
-                          </td>
-                          <td className="py-2">
-                            <div className="flex flex-wrap gap-1">
-                              {g.products.map((p) => <span key={p} className={`px-1.5 py-0.5 rounded text-xs font-medium ${productClass(p)}`}>{p}</span>)}
-                            </div>
-                          </td>
-                          <td className="py-2 text-right font-semibold text-emerald-700 pr-6">{fmtDollar(g.totalArr)}</td>
-                          <td className="py-2">
-                            {g.forecast
-                              ? <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${{ 'Commit': 'bg-green-600 text-white', 'Most Likely': 'bg-yellow-500 text-white', 'Best Case': 'bg-blue-600 text-white', 'Remaining Pipe': 'bg-gray-400 text-white' }[g.forecast] ?? 'bg-gray-100 text-gray-500'}`}>{g.forecast}</span>
-                              : <span className="text-gray-300 text-xs">—</span>}
-                          </td>
-                          <td className="py-2 text-gray-500 text-xs whitespace-nowrap">{fmtDate(g.closeDate)}</td>
-                          <td className="py-2 text-gray-500 text-xs whitespace-nowrap">{fmtDate(g.importedAt.slice(0, 10))}</td>
-                          <td className="py-2 text-gray-500">{g.ai_ae || '—'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            )}
-
-            {/* ARR Increases */}
-            {arrUpChanges.length > 0 && (
-              <div className="mb-6">
-                <div className="flex items-center gap-3 mb-2">
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                    ARR Increases <span className="normal-case font-normal text-gray-400">({arrNetGrouped.length})</span>
-                  </p>
-                  <div className="flex rounded border border-gray-200 overflow-hidden text-xs bg-white">
-                    {(['all', '50k_plus'] as const).map((f) => (
-                      <button
-                        key={f}
-                        onClick={() => setArrFilter(f)}
-                        className={`px-2 py-0.5 font-medium transition-colors ${arrFilter === f ? 'bg-gray-700 text-white' : 'text-gray-500 hover:bg-gray-50'}`}
-                      >
-                        {f === 'all' ? 'All' : '≥$50K'}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                {arrNetGrouped.length === 0 ? (
-                  <p className="text-xs text-gray-400 italic">No opps ≥$50K with net ARR increases in this period.</p>
-                ) : (
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-xs text-gray-400 border-b border-gray-100 font-semibold">
-                        <th className="text-left pb-2">Account</th>
-                        <th className="text-left pb-2">Products</th>
-                        <th className="text-right pb-2">Total ARR</th>
-                        <th className="text-right pb-2 pr-6">Net ARR ▲</th>
-                        <th className="text-left pb-2">Forecast</th>
-                        <th className="text-left pb-2">Close Date</th>
-                        <th className="text-left pb-2">Change Date</th>
-                        <th className="text-left pb-2">AI AE</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-50">
-                      {arrNetGrouped.map((g) => (
-                        <tr key={g.crm_opportunity_id} className="hover:bg-gray-50">
-                          <td className="py-2">
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-medium text-gray-900">{g.account_name}</span>
-                              <button onClick={() => window.api.openExternal(`https://zendesk.lightning.force.com/lightning/r/Opportunity/${g.crm_opportunity_id}/view`)} className="text-blue-400 hover:text-blue-600 text-xs">↗</button>
-                            </div>
-                          </td>
-                          <td className="py-2">
-                            <div className="flex flex-wrap gap-1">
-                              {g.products.map((p) => <span key={p} className={`px-1.5 py-0.5 rounded text-xs font-medium ${productClass(p)}`}>{p}</span>)}
-                            </div>
-                          </td>
-                          <td className="py-2 text-right text-gray-700 font-medium text-xs">{fmtDollar(g.totalArr)}</td>
-                          <td className="py-2 text-right text-emerald-700 font-semibold text-xs pr-6">+{fmtDollar(g.netDelta)}</td>
-                          <td className="py-2">
-                            {g.forecast
-                              ? <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${{ 'Commit': 'bg-green-600 text-white', 'Most Likely': 'bg-yellow-500 text-white', 'Best Case': 'bg-blue-600 text-white', 'Remaining Pipe': 'bg-gray-400 text-white' }[g.forecast] ?? 'bg-gray-100 text-gray-500'}`}>{g.forecast}</span>
-                              : <span className="text-gray-300 text-xs">—</span>}
-                          </td>
-                          <td className="py-2 text-gray-500 text-xs whitespace-nowrap">{fmtDate(g.closeDate)}</td>
-                          <td className="py-2 text-gray-500 text-xs whitespace-nowrap">{fmtDate(g.importedAt.slice(0, 10))}</td>
-                          <td className="py-2 text-gray-500">{g.ai_ae || '—'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            )}
-
-            {/* Forecast Upgrades */}
-            {forecastUpgrades.length > 0 && (
-              <div className="mb-6">
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                  Forecast Upgrades <span className="normal-case font-normal text-gray-400">(→ Most Likely or Commit, {forecastUpgrades.length})</span>
-                </p>
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-xs text-gray-400 border-b border-gray-100 font-semibold">
-                      <th className="text-left pb-2">Account</th>
-                      <th className="text-left pb-2">Product</th>
-                      <th className="text-right pb-2">ARR</th>
-                      <th className="text-left pb-2">Was</th>
-                      <th className="text-left pb-2">Now</th>
-                      <th className="text-left pb-2">AI AE</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {forecastUpgrades.sort((a, b) => {
-                      const rank: Record<string, number> = { 'Commit': 2, 'Most Likely': 1 };
-                      return (rank[b.new_value ?? ''] ?? 0) - (rank[a.new_value ?? ''] ?? 0);
-                    }).map((c) => {
-                      const key = `${c.crm_opportunity_id}::${c.product}`;
-                      const arr = oppArrMap.get(key) ?? 0;
-                      const newVal = c.new_value ?? '';
-                      return (
-                        <tr key={c.id} className="hover:bg-gray-50">
-                          <td className="py-2 font-medium text-gray-900">{c.account_name}</td>
-                          <td className="py-2"><span className={`px-1.5 py-0.5 rounded text-xs font-medium ${productClass(c.product)}`}>{c.product}</span></td>
-                          <td className="py-2 text-right font-semibold text-gray-700 text-xs">{fmtDollar(arr)}</td>
-                          <td className="py-2 text-gray-400 text-xs">{c.old_value || '—'}</td>
-                          <td className="py-2">
-                            <span className={`px-1.5 py-0.5 rounded text-xs font-semibold ${newVal === 'Commit' ? 'bg-emerald-100 text-emerald-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                              {newVal}
+                    <tr key={deal.crm_opportunity_id} className="hover:bg-gray-50">
+                      <td className="py-2 pr-3">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-medium text-gray-900">{deal.account_name}</span>
+                          <button
+                            onClick={() => window.api.openExternal(`https://zendesk.lightning.force.com/lightning/r/Opportunity/${deal.crm_opportunity_id}/view`)}
+                            className="text-blue-400 hover:text-blue-600 text-xs"
+                          >
+                            ↗
+                          </button>
+                        </div>
+                      </td>
+                      <td className="py-2 px-2">
+                        <div className="flex flex-wrap gap-1">
+                          {[...new Set(deal.products)].map((p) => (
+                            <span key={p} className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${productClass(p)}`}>
+                              {p}
                             </span>
-                          </td>
-                          <td className="py-2 text-gray-500">{c.ai_ae || '—'}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                          ))}
+                        </div>
+                      </td>
+                      <td className="py-2 px-2 text-right font-semibold text-gray-700">{fmtDollar(deal.totalArr)}</td>
+                      <td className="py-2 px-2 text-right font-semibold text-emerald-700">
+                        <div className="flex items-center justify-end gap-1">
+                          {arrDiff && <span className="text-orange-500" title="ARR differs from VP">⚠️</span>}
+                          {fmtDollar(deal.totalAisArr)}
+                        </div>
+                      </td>
+                      <td className="py-2 px-2">
+                        {deal.vp_forecast ? (
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap ${
+                              {
+                                'Commit': 'bg-green-600 text-white',
+                                'Most Likely': 'bg-yellow-500 text-white',
+                                'Best Case': 'bg-blue-600 text-white',
+                                'Remaining Pipe': 'bg-gray-400 text-white',
+                              }[deal.vp_forecast] ?? 'bg-gray-100 text-gray-500'
+                            }`}
+                          >
+                            {deal.vp_forecast}
+                          </span>
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )}
+                      </td>
+                      <td className="py-2 px-2">
+                        <div className="flex items-center gap-1">
+                          {forecastDiff && <span className="text-orange-500" title="Forecast differs from VP">⚠️</span>}
+                          {deal.ais_forecast ? (
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap ${
+                                {
+                                  'Commit': 'bg-green-600 text-white',
+                                  'Most Likely': 'bg-yellow-500 text-white',
+                                  'Best Case': 'bg-blue-600 text-white',
+                                  'Remaining Pipe': 'bg-gray-400 text-white',
+                                }[deal.ais_forecast] ?? 'bg-gray-100 text-gray-500'
+                              }`}
+                            >
+                              {deal.ais_forecast}
+                            </span>
+                          ) : (
+                            <span className="text-gray-300">—</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-2 px-2 text-gray-500">{fmtDate(deal.vp_close_date)}</td>
+                      <td className="py-2 px-2 text-gray-500">
+                        <div className="flex items-center gap-1">
+                          {dateDiff && <span className="text-orange-500" title="Close date differs from VP">⚠️</span>}
+                          {fmtDate(deal.ais_close_date)}
+                        </div>
+                      </td>
+                      <td className="py-2 px-2 text-gray-500">{deal.ai_ae || '—'}</td>
+                      <td className="py-2 pl-2 text-gray-500 max-w-[200px] truncate" title={deal.product_specialist_notes}>
+                        {deal.product_specialist_notes || '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </>
         )}
       </Section>

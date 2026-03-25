@@ -204,6 +204,40 @@ function runMigrations(): void {
     );
   `);
 
+  // pipeline_snapshots: stores complete pipeline state at each import for historical reconstruction
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pipeline_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      imported_at TEXT NOT NULL UNIQUE,
+      snapshot_data TEXT NOT NULL,
+      total_pipeline REAL NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_pipeline_snapshots_imported_at
+      ON pipeline_snapshots(imported_at);
+  `);
+
+  // closed_won_snapshots: stores complete closed won state at each import for historical reconstruction
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS closed_won_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      imported_at TEXT NOT NULL UNIQUE,
+      snapshot_data TEXT NOT NULL,
+      total_bookings REAL NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_closed_won_snapshots_imported_at
+      ON closed_won_snapshots(imported_at);
+  `);
+
+  // excluded_deals: tracks manually excluded opportunities (persists even when deals are removed from pipeline)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS excluded_deals (
+      crm_opportunity_id TEXT PRIMARY KEY,
+      excluded_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
   // Safe migrations for existing databases that may not have new columns yet
   for (const col of [
     `ALTER TABLE accounts ADD COLUMN target_products TEXT NOT NULL DEFAULT '[]'`,
@@ -220,6 +254,10 @@ function runMigrations(): void {
     `ALTER TABLE forecast_opps ADD COLUMN ais_arr_manual INTEGER DEFAULT 0`,
     `ALTER TABLE forecast_opps ADD COLUMN ais_forecast_manual INTEGER DEFAULT 0`,
     `ALTER TABLE forecast_opps ADD COLUMN ais_close_date_manual INTEGER DEFAULT 0`,
+    // Closed won edited bookings
+    `ALTER TABLE closed_won_opps ADD COLUMN edited_bookings REAL DEFAULT NULL`,
+    // Exclude deals from analysis (for data corrections)
+    `ALTER TABLE forecast_opps ADD COLUMN exclude_from_analysis INTEGER DEFAULT 0`,
   ]) {
     try { db.exec(col); } catch { /* column already exists */ }
   }
@@ -459,6 +497,7 @@ function deserializeForecastOpp(row: Record<string, unknown>): ForecastOpp {
     push_count: (row.push_count as number) ?? 0,
     total_days_pushed: (row.total_days_pushed as number) ?? 0,
     stage_entered_at: (row.stage_entered_at as string) || null,
+    exclude_from_analysis: (row.exclude_from_analysis as number) ?? 0,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -499,6 +538,201 @@ export function getAisValues(): Map<string, { ais_forecast: string | null; ais_a
   return map;
 }
 
+// ── Pipeline Snapshots (Historical Reconstruction) ────────────────
+
+export function savePipelineSnapshot(importedAt: string, opps: ForecastOpp[]): void {
+  try {
+    const snapshotData = JSON.stringify(opps);
+    const totalPipeline = opps.reduce((sum, o) => sum + (o.ais_arr ?? o.product_arr_usd), 0);
+
+    db.prepare(`
+      INSERT OR REPLACE INTO pipeline_snapshots (imported_at, snapshot_data, total_pipeline)
+      VALUES (?, ?, ?)
+    `).run(importedAt, snapshotData, totalPipeline);
+
+    console.log(`[database] Saved pipeline snapshot for ${importedAt}: ${opps.length} opps, $${totalPipeline.toFixed(0)}`);
+  } catch (err) {
+    console.error('[database] Error saving pipeline snapshot:', err);
+  }
+}
+
+export function getSnapshotAtDate(asOfDate: string): ForecastOpp[] | null {
+  try {
+    // Find the most recent snapshot at or before the target date
+    // Append end-of-day time to ensure we capture snapshots from the requested date
+    const asOfDateTime = asOfDate.includes('T') ? asOfDate : `${asOfDate}T23:59:59`;
+
+    const row = db.prepare(`
+      SELECT snapshot_data FROM pipeline_snapshots
+      WHERE imported_at <= ?
+      ORDER BY imported_at DESC
+      LIMIT 1
+    `).get(asOfDateTime) as { snapshot_data: string } | undefined;
+
+    if (!row) {
+      console.log(`[database] No snapshot found for ${asOfDate}`);
+      return null;
+    }
+
+    const opps = JSON.parse(row.snapshot_data) as ForecastOpp[];
+    console.log(`[database] Retrieved snapshot for ${asOfDate}: ${opps.length} opps`);
+    return opps;
+  } catch (err) {
+    console.error('[database] Error getting snapshot:', err);
+    return null;
+  }
+}
+
+export function getSnapshotsBetweenDates(fromDate: string, toDate: string): { start: ForecastOpp[] | null; end: ForecastOpp[] | null } {
+  return {
+    start: getSnapshotAtDate(fromDate),
+    end: getSnapshotAtDate(toDate),
+  };
+}
+
+// ── Closed Won Snapshots ───────────────────────────────────────────
+
+export function saveClosedWonSnapshot(importedAt: string, deals: ClosedWonOpp[]): void {
+  try {
+    const snapshotData = JSON.stringify(deals);
+    const totalBookings = deals.reduce((sum, d) => sum + d.bookings, 0);
+
+    db.prepare(`
+      INSERT OR REPLACE INTO closed_won_snapshots (imported_at, snapshot_data, total_bookings)
+      VALUES (?, ?, ?)
+    `).run(importedAt, snapshotData, totalBookings);
+
+    console.log(`[database] Saved closed won snapshot for ${importedAt}: ${deals.length} deals, $${totalBookings.toFixed(0)}`);
+  } catch (err) {
+    console.error('[database] Error saving closed won snapshot:', err);
+  }
+}
+
+export function getClosedWonSnapshotAtDate(asOfDate: string): ClosedWonOpp[] | null {
+  try {
+    // Append end-of-day time to ensure we capture snapshots from the requested date
+    const asOfDateTime = asOfDate.includes('T') ? asOfDate : `${asOfDate}T23:59:59`;
+
+    const row = db.prepare(`
+      SELECT snapshot_data FROM closed_won_snapshots
+      WHERE imported_at <= ?
+      ORDER BY imported_at DESC
+      LIMIT 1
+    `).get(asOfDateTime) as { snapshot_data: string } | undefined;
+
+    if (!row) {
+      console.log(`[database] No closed won snapshot found for ${asOfDate}`);
+      return null;
+    }
+
+    const deals = JSON.parse(row.snapshot_data) as ClosedWonOpp[];
+    console.log(`[database] Retrieved closed won snapshot for ${asOfDate}: ${deals.length} deals`);
+    return deals;
+  } catch (err) {
+    console.error('[database] Error getting closed won snapshot:', err);
+    return null;
+  }
+}
+
+export interface SnapshotSummary {
+  imported_at: string;
+  total_pipeline: number;
+  opp_count: number;
+  total_bookings?: number;
+  deal_count?: number;
+  has_pipeline: boolean;
+  has_closed_won: boolean;
+}
+
+export function getAllSnapshots(): SnapshotSummary[] {
+  try {
+    // Get all unique dates from both tables
+    const allDates = db.prepare(`
+      SELECT DISTINCT imported_at FROM (
+        SELECT imported_at FROM pipeline_snapshots
+        UNION
+        SELECT imported_at FROM closed_won_snapshots
+      )
+      ORDER BY imported_at DESC
+    `).all() as Array<{ imported_at: string }>;
+
+    return allDates.map(({ imported_at }) => {
+      // Check pipeline snapshot
+      const pipelineRow = db.prepare('SELECT total_pipeline, snapshot_data FROM pipeline_snapshots WHERE imported_at = ?')
+        .get(imported_at) as { total_pipeline: number; snapshot_data: string } | undefined;
+
+      // Check closed won snapshot
+      const cwRow = db.prepare('SELECT total_bookings, snapshot_data FROM closed_won_snapshots WHERE imported_at = ?')
+        .get(imported_at) as { total_bookings: number; snapshot_data: string } | undefined;
+
+      const oppCount = pipelineRow ? (JSON.parse(pipelineRow.snapshot_data) as ForecastOpp[]).length : 0;
+      const dealCount = cwRow ? (JSON.parse(cwRow.snapshot_data) as ClosedWonOpp[]).length : 0;
+
+      return {
+        imported_at,
+        total_pipeline: pipelineRow?.total_pipeline ?? 0,
+        opp_count: oppCount,
+        total_bookings: cwRow?.total_bookings,
+        deal_count: dealCount,
+        has_pipeline: !!pipelineRow,
+        has_closed_won: !!cwRow,
+      };
+    });
+  } catch (err) {
+    console.error('[database] Error getting snapshots list:', err);
+    return [];
+  }
+}
+
+export function deleteSnapshot(importedAt: string): void {
+  try {
+    db.prepare('DELETE FROM pipeline_snapshots WHERE imported_at = ?').run(importedAt);
+    db.prepare('DELETE FROM closed_won_snapshots WHERE imported_at = ?').run(importedAt);
+    console.log('[database] Deleted snapshot:', importedAt);
+  } catch (err) {
+    console.error('[database] Error deleting snapshot:', err);
+    throw err;
+  }
+}
+
+export function getPipelineSnapshots(): Array<{ date: string; data: ForecastOpp[] }> {
+  try {
+    const rows = db.prepare(`
+      SELECT imported_at, snapshot_data
+      FROM pipeline_snapshots
+      ORDER BY imported_at DESC
+    `).all() as Array<{ imported_at: string; snapshot_data: string }>;
+
+    return rows.map((row) => ({
+      date: row.imported_at.split('T')[0], // Just the date part
+      data: JSON.parse(row.snapshot_data) as ForecastOpp[],
+    }));
+  } catch (err) {
+    console.error('[database] Error getting pipeline snapshots:', err);
+    return [];
+  }
+}
+
+export function snapshotCurrentState(): { pipelineCount: number; cwCount: number } {
+  try {
+    const importedAt = new Date().toISOString();
+
+    // Snapshot current pipeline
+    const pipelineOpps = getForecastOpps();
+    savePipelineSnapshot(importedAt, pipelineOpps);
+
+    // Snapshot current closed won
+    const cwDeals = getClosedWonOpps();
+    saveClosedWonSnapshot(importedAt, cwDeals);
+
+    console.log(`[database] Snapshotted current state: ${pipelineOpps.length} opps, ${cwDeals.length} deals`);
+    return { pipelineCount: pipelineOpps.length, cwCount: cwDeals.length };
+  } catch (err) {
+    console.error('[database] Error snapshotting current state:', err);
+    throw err;
+  }
+}
+
 type ForecastOppInput = Omit<ForecastOpp, 'id' | 'created_at' | 'updated_at'> & {
   push_count?: number;
   total_days_pushed?: number;
@@ -533,7 +767,10 @@ export function replaceForecastOpps(
     const existingKeys = new Set(
       (db.prepare('SELECT crm_opportunity_id || \'::\'|| product AS k FROM forecast_opps').all() as { k: string }[]).map((r) => r.k),
     );
+    console.log(`[database] replaceForecastOpps: ${existingKeys.size} existing opps, about to delete all and insert ${opps.length} new opps`);
     deleteAll.run();
+    const afterDelete = db.prepare('SELECT COUNT(*) as count FROM forecast_opps').get() as { count: number };
+    console.log(`[database] After DELETE: ${afterDelete.count} opps remaining (should be 0)`);
     for (const opp of opps) {
       insert.run(
         opp.crm_opportunity_id,
@@ -567,9 +804,12 @@ export function replaceForecastOpps(
       if (existingKeys.has(`${opp.crm_opportunity_id}::${opp.product}`)) updated++;
       else inserted++;
     }
+    const finalCount = db.prepare('SELECT COUNT(*) as count FROM forecast_opps').get() as { count: number };
+    console.log(`[database] After INSERT: ${finalCount.count} opps in database (inserted: ${inserted}, updated: ${updated})`);
   });
 
   run();
+  console.log(`[database] Transaction complete. Final result: inserted=${inserted}, updated=${updated}`);
   return { inserted, updated };
 }
 
@@ -602,6 +842,40 @@ export function updateForecastAisField(
 
 export function setForecastTopDeal(id: number, value: number): void {
   db.prepare(`UPDATE forecast_opps SET ais_top_deal = ?, updated_at = datetime('now') WHERE id = ?`).run(value, id);
+}
+
+export function deleteForecastOpp(id: number): void {
+  db.prepare(`DELETE FROM forecast_opps WHERE id = ?`).run(id);
+}
+
+export function toggleExcludeFromAnalysis(oppId: string, exclude: boolean): void {
+  if (exclude) {
+    // Add to excluded_deals table (use INSERT OR IGNORE to avoid errors if already excluded)
+    db.prepare(`
+      INSERT OR IGNORE INTO excluded_deals (crm_opportunity_id)
+      VALUES (?)
+    `).run(oppId);
+  } else {
+    // Remove from excluded_deals table
+    db.prepare(`
+      DELETE FROM excluded_deals
+      WHERE crm_opportunity_id = ?
+    `).run(oppId);
+  }
+
+  // Also update the forecast_opps table if the deal still exists there
+  db.prepare(`
+    UPDATE forecast_opps
+    SET exclude_from_analysis = ?, updated_at = datetime('now')
+    WHERE crm_opportunity_id = ?
+  `).run(exclude ? 1 : 0, oppId);
+}
+
+export function getExcludedDealIds(): Set<string> {
+  const rows = db.prepare(`
+    SELECT crm_opportunity_id FROM excluded_deals
+  `).all() as Array<{ crm_opportunity_id: string }>;
+  return new Set(rows.map(r => r.crm_opportunity_id));
 }
 
 // Returns a snapshot of all existing pipeline opps for diff comparison before re-import
@@ -725,7 +999,7 @@ function getForecastDifferences(): ForecastDifference[] {
     // Get opps where manual overrides exist
     const opps = db.prepare(`
       SELECT
-        crm_opportunity_id, account_name, product, ai_ae, manager_name,
+        crm_opportunity_id, account_name, product, ai_ae, manager_name, region, segment,
         vp_deal_forecast, ais_forecast, ais_forecast_manual,
         product_arr_usd, ais_arr, ais_arr_manual,
         close_date, ais_close_date, ais_close_date_manual
@@ -737,6 +1011,8 @@ function getForecastDifferences(): ForecastDifference[] {
     product: string;
     ai_ae: string;
     manager_name: string;
+    region: string;
+    segment: string;
     vp_deal_forecast: string;
     ais_forecast: string | null;
     ais_forecast_manual: number;
@@ -761,9 +1037,14 @@ function getForecastDifferences(): ForecastDifference[] {
           product: opp.product,
           ai_ae: opp.ai_ae,
           manager_name: opp.manager_name,
+          region: opp.region,
+          segment: opp.segment,
           diff_type: 'category',
           vp_value: vpMapped || opp.vp_deal_forecast || '—',
           ais_value: opp.ais_forecast,
+          opp_arr: opp.product_arr_usd,
+          ais_arr: opp.ais_arr ?? opp.product_arr_usd,
+          close_date: opp.ais_close_date || opp.close_date,
         });
       }
     }
@@ -778,9 +1059,14 @@ function getForecastDifferences(): ForecastDifference[] {
           product: opp.product,
           ai_ae: opp.ai_ae,
           manager_name: opp.manager_name,
+          region: opp.region,
+          segment: opp.segment,
           diff_type: 'arr',
           vp_value: `$${opp.product_arr_usd.toLocaleString()}`,
           ais_value: `$${opp.ais_arr.toLocaleString()}`,
+          opp_arr: opp.product_arr_usd,
+          ais_arr: opp.ais_arr,
+          close_date: opp.ais_close_date || opp.close_date,
           arr_delta: delta,
         });
       }
@@ -799,9 +1085,14 @@ function getForecastDifferences(): ForecastDifference[] {
           product: opp.product,
           ai_ae: opp.ai_ae,
           manager_name: opp.manager_name,
+          region: opp.region,
+          segment: opp.segment,
           diff_type: 'date',
           vp_value: opp.close_date,
           ais_value: opp.ais_close_date,
+          opp_arr: opp.product_arr_usd,
+          ais_arr: opp.ais_arr ?? opp.product_arr_usd,
+          close_date: opp.ais_close_date,
           days_delta: daysDelta,
         });
       }
@@ -831,6 +1122,7 @@ function deserializeClosedWonOpp(row: Record<string, unknown>): ClosedWonOpp {
     ai_ae: (row.ai_ae as string) || '',
     close_date: (row.close_date as string) || '',
     bookings: (row.bookings as number) || 0,
+    edited_bookings: (row.edited_bookings as number | null) ?? null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -844,18 +1136,39 @@ export function getClosedWonOpps(): ClosedWonOpp[] {
 export function replaceClosedWonOpps(
   opps: Omit<ClosedWonOpp, 'id' | 'created_at' | 'updated_at'>[],
 ): { inserted: number } {
-  const insert = db.prepare(`
+  const upsert = db.prepare(`
     INSERT INTO closed_won_opps (
       crm_opportunity_id, account_name, manager_name, ae_name,
       region, segment, product, type, ai_ae, close_date, bookings
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(crm_opportunity_id, product) DO UPDATE SET
+      account_name = excluded.account_name,
+      manager_name = excluded.manager_name,
+      ae_name = excluded.ae_name,
+      region = excluded.region,
+      segment = excluded.segment,
+      type = excluded.type,
+      ai_ae = excluded.ai_ae,
+      close_date = excluded.close_date,
+      bookings = excluded.bookings,
+      updated_at = datetime('now')
   `);
-  const deleteAll = db.prepare('DELETE FROM closed_won_opps');
+
+  // Get all current opps (to detect removals)
+  const currentKeys = new Set(
+    db.prepare('SELECT crm_opportunity_id, product FROM closed_won_opps')
+      .all()
+      .map((r: any) => `${r.crm_opportunity_id}::${r.product}`)
+  );
+  const newKeys = new Set(opps.map((o) => `${o.crm_opportunity_id}::${o.product}`));
+
+  // Delete opps that are no longer in the import
+  const deleteStmt = db.prepare('DELETE FROM closed_won_opps WHERE crm_opportunity_id = ? AND product = ?');
 
   const run = db.transaction(() => {
-    deleteAll.run();
+    // Upsert all imported opps
     for (const opp of opps) {
-      insert.run(
+      upsert.run(
         opp.crm_opportunity_id,
         opp.account_name,
         opp.manager_name,
@@ -869,10 +1182,26 @@ export function replaceClosedWonOpps(
         opp.bookings,
       );
     }
+
+    // Remove opps that disappeared from the import
+    for (const key of currentKeys) {
+      if (!newKeys.has(key)) {
+        const [oppId, product] = key.split('::');
+        deleteStmt.run(oppId, product);
+      }
+    }
   });
 
   run();
   return { inserted: opps.length };
+}
+
+export function updateClosedWonBookings(id: number, editedBookings: number | null): void {
+  db.prepare(`
+    UPDATE closed_won_opps
+    SET edited_bookings = ?, updated_at = datetime('now')
+    WHERE id = ?
+  `).run(editedBookings, id);
 }
 
 // ── Quotas ─────────────────────────────────────────────────────
