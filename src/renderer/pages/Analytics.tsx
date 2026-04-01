@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { AlertReason, AnalyticsData, ChangeType, ClosedWonOpp, ForecastChange, ForecastDifference, ForecastOpp, OppPushStats, Quota } from '../../shared/types';
-import { mapForecast, toCloseQuarter } from '../../shared/utils';
+import { mapForecast, toCloseQuarter, calculateWeightedPipe } from '../../shared/utils';
 
 // ── Formatters ─────────────────────────────────────────────────
 
@@ -1958,6 +1958,7 @@ function ExecutiveSummaryTab({
     .filter((o) => toCloseQuarter(o.close_date) === currentQuarter && passesOtherFilters(o))
     .reduce((s, o) => s + (o.edited_bookings ?? o.bookings), 0);
   const dealBacked     = qtrCWTotal + commitArr + mlArr;
+  const weightedPipe   = qtrCWTotal + qtrOpps.reduce((s, o) => s + calculateWeightedPipe(getArr(o), o.stage_name), 0);
   const qtrNum         = parseInt((currentQuarter.match(/Q(\d)/) ?? [])[1] ?? '0');
   const totalQtrTarget = quotas
     .filter((q) => {
@@ -2208,10 +2209,11 @@ function ExecutiveSummaryTab({
 
       {/* ── Section 1: What's Forecast This Quarter ── */}
       <Section title={`What's Forecast This Quarter (${currentQuarter}: ${quarterToDateRange(currentQuarter)})`} emoji="🎯">
-        <div className="grid grid-cols-3 gap-3 mb-3">
-          <BigCard label="Target"      value={totalQtrTarget > 0 ? fmtDollar(totalQtrTarget) : '—'} sub={currentQuarter}               color="gray"    />
-          <BigCard label="Deal Backed" value={fmtDollar(dealBacked)}                                sub="CW + Commit + Most Likely"    color="blue"    />
-          <BigCard label="Closed Won"  value={fmtDollar(qtrCWTotal)}                               sub={`${new Set(closedWon.filter((o) => toCloseQuarter(o.close_date) === currentQuarter && passesOtherFilters(o)).map((o) => o.crm_opportunity_id)).size} deals`} color="green" />
+        <div className="grid grid-cols-4 gap-3 mb-3">
+          <BigCard label="Target"        value={totalQtrTarget > 0 ? fmtDollar(totalQtrTarget) : '—'} sub={currentQuarter}               color="gray"    />
+          <BigCard label="Deal Backed"   value={fmtDollar(dealBacked)}                                sub="CW + Commit + Most Likely"    color="blue"    />
+          <BigCard label="Weighted Pipe" value={fmtDollar(weightedPipe)}                              sub="CW + Stage-based Win Rates"  color="purple"  />
+          <BigCard label="Closed Won"    value={fmtDollar(qtrCWTotal)}                                sub={`${new Set(closedWon.filter((o) => toCloseQuarter(o.close_date) === currentQuarter && passesOtherFilters(o)).map((o) => o.crm_opportunity_id)).size} deals`} color="green" />
         </div>
         <div className="grid grid-cols-5 gap-3">
           <BigCard label={forecastType === 'ais' ? 'AIS Commit'       : 'VP Commit'}       value={fmtDollar(commitArr)}    sub={`${pct(commitArr,   totalQtrPipe)} of pipe`} color="emerald" />

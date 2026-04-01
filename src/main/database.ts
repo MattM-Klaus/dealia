@@ -90,6 +90,24 @@ function runMigrations(): void {
       updated_at         TEXT    NOT NULL DEFAULT (datetime('now')),
       UNIQUE(crm_opportunity_id, product)
     );
+
+    CREATE TABLE IF NOT EXISTS closed_lost_opps (
+      id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+      crm_opportunity_id TEXT    NOT NULL,
+      account_name       TEXT    NOT NULL DEFAULT '',
+      manager_name       TEXT    NOT NULL DEFAULT '',
+      ae_name            TEXT    NOT NULL DEFAULT '',
+      region             TEXT    NOT NULL DEFAULT '',
+      segment            TEXT    NOT NULL DEFAULT '',
+      product            TEXT    NOT NULL DEFAULT '',
+      type               TEXT    NOT NULL DEFAULT '',
+      ai_ae              TEXT    NOT NULL DEFAULT '',
+      close_date         TEXT    NOT NULL DEFAULT '',
+      bookings           REAL    NOT NULL DEFAULT 0,
+      created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+      updated_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(crm_opportunity_id, product)
+    );
   `);
 
   // Migrate forecast_opps / closed_won_opps if they were created with the wrong
@@ -135,6 +153,23 @@ function runMigrations(): void {
       UNIQUE(crm_opportunity_id, product)
     );
     CREATE TABLE IF NOT EXISTS closed_won_opps (
+      id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+      crm_opportunity_id TEXT    NOT NULL,
+      account_name       TEXT    NOT NULL DEFAULT '',
+      manager_name       TEXT    NOT NULL DEFAULT '',
+      ae_name            TEXT    NOT NULL DEFAULT '',
+      region             TEXT    NOT NULL DEFAULT '',
+      segment            TEXT    NOT NULL DEFAULT '',
+      product            TEXT    NOT NULL DEFAULT '',
+      type               TEXT    NOT NULL DEFAULT '',
+      ai_ae              TEXT    NOT NULL DEFAULT '',
+      close_date         TEXT    NOT NULL DEFAULT '',
+      bookings           REAL    NOT NULL DEFAULT 0,
+      created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+      updated_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(crm_opportunity_id, product)
+    );
+    CREATE TABLE IF NOT EXISTS closed_lost_opps (
       id                 INTEGER PRIMARY KEY AUTOINCREMENT,
       crm_opportunity_id TEXT    NOT NULL,
       account_name       TEXT    NOT NULL DEFAULT '',
@@ -295,6 +330,17 @@ function runMigrations(): void {
     CREATE INDEX IF NOT EXISTS idx_commission_issues_period ON commission_issues(period);
   `);
 
+  // Deal Backed Reason Tracking table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS deal_backed_reasons (
+      crm_opportunity_id TEXT NOT NULL,
+      imported_at TEXT NOT NULL,
+      reason TEXT DEFAULT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (crm_opportunity_id, imported_at)
+    );
+  `);
+
   // Safe migrations for existing databases that may not have new columns yet
   for (const col of [
     `ALTER TABLE accounts ADD COLUMN target_products TEXT NOT NULL DEFAULT '[]'`,
@@ -448,6 +494,7 @@ export function setSetting(key: string, value: string): void {
 
 export function getSettings(): AppSettings {
   const tableauFiltersJson = getSetting('tableau_filters') || '{"product_group":[],"segments":[],"close_quarter":[],"commissionable":[],"ai_ae":[],"svp_leader":[],"svp_minus_1":[],"vp_team":[]}';
+  const myAiAeTeamJson = getSetting('my_ai_ae_team') || '[]';
 
   return {
     slack_webhook_url: getSetting('slack_webhook_url') || '',
@@ -458,6 +505,7 @@ export function getSettings(): AppSettings {
     tableau_site: getSetting('tableau_site') || 'zendesktableau',
     tableau_view_id: getSetting('tableau_view_id') || '',
     tableau_filters: JSON.parse(tableauFiltersJson),
+    my_ai_ae_team: JSON.parse(myAiAeTeamJson),
   };
 }
 
@@ -485,6 +533,9 @@ export function saveSettings(settings: Partial<AppSettings>): void {
   }
   if (settings.tableau_filters !== undefined) {
     setSetting('tableau_filters', JSON.stringify(settings.tableau_filters));
+  }
+  if (settings.my_ai_ae_team !== undefined) {
+    setSetting('my_ai_ae_team', JSON.stringify(settings.my_ai_ae_team));
   }
 }
 
@@ -753,7 +804,7 @@ export function deleteSnapshot(importedAt: string): void {
   }
 }
 
-export function getPipelineSnapshots(): Array<{ date: string; data: ForecastOpp[] }> {
+export function getPipelineSnapshots(): Array<{ date: string; importedAt: string; data: ForecastOpp[] }> {
   try {
     const rows = db.prepare(`
       SELECT imported_at, snapshot_data
@@ -763,6 +814,7 @@ export function getPipelineSnapshots(): Array<{ date: string; data: ForecastOpp[
 
     return rows.map((row) => ({
       date: row.imported_at.split('T')[0], // Just the date part
+      importedAt: row.imported_at, // Full timestamp for tracking
       data: JSON.parse(row.snapshot_data) as ForecastOpp[],
     }));
   } catch (err) {
@@ -1262,6 +1314,96 @@ export function updateClosedWonBookings(id: number, editedBookings: number | nul
   `).run(editedBookings, id);
 }
 
+// ── Closed Lost ─────────────────────────────────────────────────
+
+function deserializeClosedLostOpp(row: Record<string, unknown>): ClosedWonOpp {
+  return {
+    id: row.id as number,
+    crm_opportunity_id: row.crm_opportunity_id as string,
+    account_name: (row.account_name as string) || '',
+    manager_name: (row.manager_name as string) || '',
+    ae_name: (row.ae_name as string) || '',
+    region: (row.region as string) || '',
+    segment: (row.segment as string) || '',
+    product: normalizeProduct((row.product as string) || ''),
+    type: (row.type as string) || '',
+    ai_ae: (row.ai_ae as string) || '',
+    close_date: (row.close_date as string) || '',
+    bookings: (row.bookings as number) || 0,
+    edited_bookings: (row.edited_bookings as number | null) ?? null,
+    created_at: row.created_at as string,
+    updated_at: row.updated_at as string,
+  };
+}
+
+export function getClosedLostOpps(): ClosedWonOpp[] {
+  const rows = db.prepare('SELECT * FROM closed_lost_opps ORDER BY close_date DESC').all();
+  return rows.map((r) => deserializeClosedLostOpp(r as Record<string, unknown>));
+}
+
+export function replaceClosedLostOpps(
+  opps: Omit<ClosedWonOpp, 'id' | 'created_at' | 'updated_at'>[],
+): { inserted: number } {
+  const upsert = db.prepare(`
+    INSERT INTO closed_lost_opps (
+      crm_opportunity_id, account_name, manager_name, ae_name,
+      region, segment, product, type, ai_ae, close_date, bookings
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(crm_opportunity_id, product) DO UPDATE SET
+      account_name = excluded.account_name,
+      manager_name = excluded.manager_name,
+      ae_name = excluded.ae_name,
+      region = excluded.region,
+      segment = excluded.segment,
+      type = excluded.type,
+      ai_ae = excluded.ai_ae,
+      close_date = excluded.close_date,
+      bookings = excluded.bookings,
+      updated_at = datetime('now')
+  `);
+
+  // Get all current opps (to detect removals)
+  const currentKeys = new Set(
+    db.prepare('SELECT crm_opportunity_id, product FROM closed_lost_opps')
+      .all()
+      .map((r: any) => `${r.crm_opportunity_id}::${r.product}`)
+  );
+  const newKeys = new Set(opps.map((o) => `${o.crm_opportunity_id}::${o.product}`));
+
+  // Delete opps that are no longer in the import
+  const deleteStmt = db.prepare('DELETE FROM closed_lost_opps WHERE crm_opportunity_id = ? AND product = ?');
+
+  const run = db.transaction(() => {
+    // Upsert all imported opps
+    for (const opp of opps) {
+      upsert.run(
+        opp.crm_opportunity_id,
+        opp.account_name,
+        opp.manager_name,
+        opp.ae_name,
+        opp.region,
+        opp.segment,
+        opp.product,
+        opp.type,
+        opp.ai_ae,
+        opp.close_date,
+        opp.bookings,
+      );
+    }
+
+    // Remove opps that disappeared from the import
+    for (const key of currentKeys) {
+      if (!newKeys.has(key)) {
+        const [oppId, product] = key.split('::');
+        deleteStmt.run(oppId, product);
+      }
+    }
+  });
+
+  run();
+  return { inserted: opps.length };
+}
+
 // ── Quotas ─────────────────────────────────────────────────────
 
 export function getQuotas(): Quota[] {
@@ -1607,6 +1749,8 @@ export function getCommissionReconciliation(period: string) {
         ae_name: '',
         manager_name: '',
         close_date: xactly.commissionable_date || '',
+        tableau_close_date: '',
+        xactly_close_date: xactly.commissionable_date || '',
         tableau_amount: null,
         xactly_amount: xactly.total_credit,
         variance: null,
@@ -1627,6 +1771,8 @@ export function getCommissionReconciliation(period: string) {
         ae_name: tableau.ae_name,
         manager_name: tableau.manager_name,
         close_date: tableau.close_date || '',
+        tableau_close_date: tableau.close_date || '',
+        xactly_close_date: '',
         tableau_amount: tableau.total_bookings,
         xactly_amount: 0,
         variance,
@@ -1648,6 +1794,8 @@ export function getCommissionReconciliation(period: string) {
         ae_name: tableau.ae_name,
         manager_name: tableau.manager_name,
         close_date: tableau.close_date || xactly.commissionable_date || '',
+        tableau_close_date: tableau.close_date || '',
+        xactly_close_date: xactly.commissionable_date || '',
         tableau_amount: tableau.total_bookings,
         xactly_amount: xactly.total_credit,
         variance,
@@ -1694,5 +1842,34 @@ export function setInvestigationStatus(opportunityNumber: string, period: string
         status = excluded.status,
         updated_at = datetime('now')
     `).run(opportunityNumber, period, status);
+  }
+}
+
+export function getDealBackedReasons(importedAt: string): Record<string, string | null> {
+  const reasons = db.prepare(`
+    SELECT crm_opportunity_id, reason
+    FROM deal_backed_reasons
+    WHERE imported_at = ?
+  `).all(importedAt) as Array<{ crm_opportunity_id: string; reason: string | null }>;
+
+  const result: Record<string, string | null> = {};
+  reasons.forEach(r => {
+    result[r.crm_opportunity_id] = r.reason;
+  });
+  return result;
+}
+
+export function setDealBackedReason(crmOpportunityId: string, importedAt: string, reason: string | null): void {
+  if (reason === null) {
+    db.prepare('DELETE FROM deal_backed_reasons WHERE crm_opportunity_id = ? AND imported_at = ?')
+      .run(crmOpportunityId, importedAt);
+  } else {
+    db.prepare(`
+      INSERT INTO deal_backed_reasons (crm_opportunity_id, imported_at, reason)
+      VALUES (?, ?, ?)
+      ON CONFLICT(crm_opportunity_id, imported_at) DO UPDATE SET
+        reason = excluded.reason,
+        updated_at = datetime('now')
+    `).run(crmOpportunityId, importedAt, reason);
   }
 }

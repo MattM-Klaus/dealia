@@ -1,13 +1,28 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import type { ForecastOpp, ClosedWonOpp, ForecastChange } from '../../shared/types';
-import { toCloseQuarter, getQuarterWeeks, formatWeekRange } from '../../shared/utils';
+import { toCloseQuarter, getQuarterWeeks, formatWeekRange, calculateWeightedPipe } from '../../shared/utils';
 
 // Print styles for PDF export
 const printStyles = `
   @media print {
+    /* Hide sidebar navigation */
+    nav {
+      display: none !important;
+    }
+
+    /* Make main content full width */
+    main {
+      margin: 0 !important;
+      padding: 0 !important;
+      width: 100% !important;
+      max-width: 100% !important;
+    }
+
     body, html {
       overflow: visible !important;
       height: auto !important;
+      margin: 0 !important;
+      padding: 0 !important;
     }
 
     .flex-1.overflow-auto {
@@ -29,9 +44,31 @@ const printStyles = `
     .page-break-avoid {
       page-break-inside: avoid;
     }
+
+    /* Hide buttons and interactive elements */
+    button {
+      display: none !important;
+    }
+
+    /* Ensure proper page sizing and color preservation */
+    * {
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
   }
 
   /* Also apply when preparing for print */
+  body.preparing-print nav {
+    display: none !important;
+  }
+
+  body.preparing-print main {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
   body.preparing-print .flex-1.overflow-auto {
     overflow: visible !important;
     height: auto !important;
@@ -41,11 +78,16 @@ const printStyles = `
   body.preparing-print [data-collapsible-content] {
     display: block !important;
   }
+
+  body.preparing-print button {
+    display: none !important;
+  }
 `;
 
 // ── Formatters ─────────────────────────────────────────────────
 
-function fmtDollar(val: number): string {
+function fmtDollar(val: number | null | undefined): string {
+  if (val == null || isNaN(val)) return '$0';
   if (val >= 1_000_000) return `$${(val / 1_000_000).toFixed(2)}M`;
   if (val >= 1_000) return `$${Math.round(val / 1_000)}K`;
   return `$${val.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
@@ -98,6 +140,7 @@ interface WeekData {
   aisCommit: number;
   aisMostLikely: number;
   aisBestCase: number;
+  weightedPipe: number; // CW + stage-based win rates
   closedWon: number; // Cumulative from quarter start to end of this week
   closedWonThisWeek: number; // Deals closed during just this specific week
   closedWonCount: number;
@@ -111,18 +154,28 @@ export default function WeeklyTrends() {
   const [opps, setOpps] = useState<ForecastOpp[]>([]);
   const [closedWon, setClosedWon] = useState<ClosedWonOpp[]>([]);
   const [changes, setChanges] = useState<ForecastChange[]>([]);
-  const [snapshots, setSnapshots] = useState<Array<{ date: string; data: ForecastOpp[] }>>([]);
+  const [snapshots, setSnapshots] = useState<Array<{ date: string; importedAt: string; data: ForecastOpp[] }>>([]);
   const [excludedDealIds, setExcludedDealIds] = useState<Set<string>>(new Set());
+  const [dealBackedReasons, setDealBackedReasons] = useState<Map<string, string | null>>(new Map());
   const [loading, setLoading] = useState(true);
+
+  // Track the last snapshot we loaded reasons for to avoid infinite loops
+  const lastLoadedSnapshotRef = React.useRef<string | null>(null);
 
   // Week selection state
   const currentQuarter = toCloseQuarter(new Date().toISOString().split('T')[0]);
-  const weeks = getQuarterWeeks(currentQuarter);
+  const weeks = React.useMemo(() => getQuarterWeeks(currentQuarter), [currentQuarter]);
   const currentWeekIndex = weeks.findIndex((w) => {
     const now = new Date();
     return now >= w.start && now <= w.end;
   });
-  const [selectedWeekIndex, setSelectedWeekIndex] = useState(currentWeekIndex >= 0 ? currentWeekIndex : weeks.length - 1);
+  // Use lazy initializer to find current week at component mount
+  const [selectedWeekIndex, setSelectedWeekIndex] = useState(() => {
+    const now = new Date();
+    const weeksArr = getQuarterWeeks(currentQuarter);
+    const idx = weeksArr.findIndex((w) => now >= w.start && now <= w.end);
+    return idx >= 0 ? idx : 0;
+  });
 
   // Region filter state
   const [selectedRegion, setSelectedRegion] = useState<'All' | 'NA' | 'LATAM'>('NA');
@@ -142,6 +195,7 @@ export default function WeeklyTrends() {
     aisCommit: false,
     aisML: false,
     aisBestCase: false,
+    weightedPipe: false,
     closedWon: true,
   });
 
@@ -173,10 +227,62 @@ export default function WeeklyTrends() {
     setPreparingPrint(true);
     document.body.classList.add('preparing-print');
 
-    // Wait for DOM to update
-    await new Promise(resolve => setTimeout(resolve, 300));
+    // Find and manipulate container elements to remove scroll constraints
+    const mainContainer = document.querySelector('main');
+    const pageContainer = document.querySelector('.flex-1.overflow-auto');
+    const sidebar = document.querySelector('nav');
 
-    const result = await window.api.exportPdf(defaultFilename);
+    // Store original styles
+    const originalStyles = {
+      mainHeight: mainContainer?.style.height,
+      mainOverflow: mainContainer?.style.overflow,
+      pageHeight: (pageContainer as HTMLElement)?.style.height,
+      pageOverflow: (pageContainer as HTMLElement)?.style.overflow,
+      pageMaxHeight: (pageContainer as HTMLElement)?.style.maxHeight,
+      sidebarDisplay: (sidebar as HTMLElement)?.style.display,
+    };
+
+    // Apply print-friendly styles
+    if (mainContainer) {
+      (mainContainer as HTMLElement).style.height = 'auto';
+      (mainContainer as HTMLElement).style.overflow = 'visible';
+    }
+    if (pageContainer) {
+      (pageContainer as HTMLElement).style.height = 'auto';
+      (pageContainer as HTMLElement).style.overflow = 'visible';
+      (pageContainer as HTMLElement).style.maxHeight = 'none';
+    }
+    if (sidebar) {
+      (sidebar as HTMLElement).style.display = 'none';
+    }
+
+    // Wait for DOM to update and layout to stabilize
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Calculate full content height
+    const fullHeight = Math.max(
+      document.body.scrollHeight,
+      document.documentElement.scrollHeight,
+      (pageContainer as HTMLElement)?.scrollHeight || 0
+    );
+
+    console.log('[PDF Export] Full content height:', fullHeight);
+
+    const result = await window.api.exportPdf(defaultFilename, fullHeight);
+
+    // Restore original styles
+    if (mainContainer) {
+      (mainContainer as HTMLElement).style.height = originalStyles.mainHeight || '';
+      (mainContainer as HTMLElement).style.overflow = originalStyles.mainOverflow || '';
+    }
+    if (pageContainer) {
+      (pageContainer as HTMLElement).style.height = originalStyles.pageHeight || '';
+      (pageContainer as HTMLElement).style.overflow = originalStyles.pageOverflow || '';
+      (pageContainer as HTMLElement).style.maxHeight = originalStyles.pageMaxHeight || '';
+    }
+    if (sidebar) {
+      (sidebar as HTMLElement).style.display = originalStyles.sidebarDisplay || '';
+    }
 
     // Disable print mode
     setPreparingPrint(false);
@@ -185,11 +291,66 @@ export default function WeeklyTrends() {
     if (!result.success && !result.canceled) {
       alert(`Failed to export PDF: ${result.error || 'Unknown error'}`);
     }
-  }, [selectedWeekIndex, currentQuarter, selectedRegion]);
+  }, [selectedWeekIndex, currentQuarter, selectedRegion, weeks]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // Reset the ref when snapshots change (e.g., when navigating back to the page)
+  useEffect(() => {
+    lastLoadedSnapshotRef.current = null;
+  }, [snapshots.length]);
+
+  // Load deal backed reasons for the selected week's previous snapshot
+  useEffect(() => {
+    const loadReasons = async () => {
+      if (snapshots.length === 0 || weeks.length === 0) return;
+      if (selectedWeekIndex <= 0) {
+        if (lastLoadedSnapshotRef.current !== null) {
+          lastLoadedSnapshotRef.current = null;
+          setDealBackedReasons(new Map());
+        }
+        return;
+      }
+
+      const previousWeek = weeks[selectedWeekIndex - 1];
+      if (!previousWeek || !previousWeek.start) {
+        if (lastLoadedSnapshotRef.current !== null) {
+          lastLoadedSnapshotRef.current = null;
+          setDealBackedReasons(new Map());
+        }
+        return;
+      }
+
+      const previousWeekStartStr = previousWeek.start.toISOString().split('T')[0];
+      const prevSnapshot = snapshots.filter((s) => s.date <= previousWeekStartStr).sort((a, b) => b.date.localeCompare(a.date))[0];
+
+      if (prevSnapshot && prevSnapshot.importedAt) {
+        // Only reload if we're looking at a different snapshot
+        if (lastLoadedSnapshotRef.current !== prevSnapshot.importedAt) {
+          try {
+            const reasons = await window.api.getDealBackedReasons(prevSnapshot.importedAt);
+            // Convert object to Map
+            const reasonsMap = new Map(Object.entries(reasons || {}));
+            lastLoadedSnapshotRef.current = prevSnapshot.importedAt;
+            setDealBackedReasons(reasonsMap);
+          } catch (err) {
+            console.error('Error loading deal backed reasons:', err);
+            lastLoadedSnapshotRef.current = null;
+            setDealBackedReasons(new Map());
+          }
+        }
+      } else {
+        if (lastLoadedSnapshotRef.current !== null) {
+          lastLoadedSnapshotRef.current = null;
+          setDealBackedReasons(new Map());
+        }
+      }
+    };
+
+    loadReasons();
+  }, [snapshots, selectedWeekIndex, weeks]);
 
   // Close manager dropdown when clicking outside
   useEffect(() => {
@@ -297,15 +458,27 @@ export default function WeeklyTrends() {
       .filter((o) => o.ais_forecast === 'Best Case')
       .reduce((sum, o) => sum + (o.ais_arr ?? o.product_arr_usd), 0);
 
-    // Cumulative closed won from actual quarter start to start of this week (Monday-to-Monday comparison)
+    // Cumulative closed won from quarter start to the day BEFORE this week starts
+    // This allows week-over-week delta to show what closed DURING the previous week
     const qStartStr = quarterStartStr;
 
     // Use local date, not UTC
     const nowLocal = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const nowStr = nowLocal.toISOString().split('T')[0];
 
-    // For current/future weeks, use today's date; for past weeks, use week START date (Monday-to-Monday)
-    const filterEndDate = isCurrentOrFuture ? nowStr : weekStartStr;
+    // For current/future weeks, use YESTERDAY (to exclude today's partial data); for past weeks, use day BEFORE week starts
+    let filterEndDate: string;
+    if (isCurrentOrFuture) {
+      // Use yesterday to exclude today's data
+      const yesterday = new Date(nowLocal);
+      yesterday.setDate(yesterday.getDate() - 1);
+      filterEndDate = yesterday.toISOString().split('T')[0];
+    } else {
+      // Calculate the day before weekStart (Sunday of previous week)
+      const dayBeforeWeek = new Date(week.start);
+      dayBeforeWeek.setDate(dayBeforeWeek.getDate() - 1);
+      filterEndDate = dayBeforeWeek.toISOString().split('T')[0];
+    }
 
     const cwUpToWeek = filteredClosedWon.filter(
       (o) => o.close_date >= qStartStr && o.close_date <= filterEndDate
@@ -345,6 +518,7 @@ export default function WeeklyTrends() {
       aisCommit,
       aisMostLikely: aisML,
       aisBestCase,
+      weightedPipe: closedWonTotal + weekOpps.reduce((sum, o) => sum + calculateWeightedPipe(o.ais_arr ?? o.product_arr_usd, o.stage_name), 0),
       closedWon: closedWonTotal,
       closedWonThisWeek: closedWonThisWeekTotal,
       closedWonCount: new Set(cwUpToWeek.map((o) => o.crm_opportunity_id)).size,
@@ -457,9 +631,48 @@ export default function WeeklyTrends() {
             ← Previous
           </button>
           <div className="text-center">
-            <p className="text-lg font-bold text-gray-900">{selectedWeek?.label}</p>
+            <p className="text-lg font-bold text-gray-900">
+              {selectedWeek && `As of ${selectedWeek.weekStart.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}`}
+            </p>
             <p className="text-xs text-gray-500">
-              {selectedWeek && formatWeekRange(selectedWeek.weekStart, selectedWeek.weekEnd)}
+              {selectedWeek && (() => {
+                if (!previousWeek) {
+                  return 'First week of quarter';
+                }
+
+                // Calculate the date range for last week's changes
+                const now = new Date();
+                const isCurrentWeek = now <= selectedWeek.weekEnd;
+
+                // Start date: day after previous cutoff (day before previous week starts)
+                const prevCutoff = new Date(previousWeek.weekStart);
+                prevCutoff.setDate(prevCutoff.getDate() - 1);
+                const startDate = new Date(prevCutoff);
+                startDate.setDate(startDate.getDate() + 1); // Day after cutoff
+
+                // End date: current cutoff (yesterday for current week, day before for historical)
+                const nowLocal = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                let endDate: Date;
+                if (isCurrentWeek) {
+                  endDate = new Date(nowLocal);
+                  endDate.setDate(endDate.getDate() - 1); // Yesterday
+                } else {
+                  endDate = new Date(selectedWeek.weekStart);
+                  endDate.setDate(endDate.getDate() - 1); // Day before week starts
+                }
+
+                // Format date range (e.g., "March 23-29" or "March 30 - April 5" if different months)
+                const startMonth = startDate.toLocaleDateString('en-US', { month: 'long' });
+                const startDay = startDate.getDate();
+                const endMonth = endDate.toLocaleDateString('en-US', { month: 'long' });
+                const endDay = endDate.getDate();
+
+                const dateRange = startMonth === endMonth
+                  ? `${startMonth} ${startDay}-${endDay}`
+                  : `${startMonth} ${startDay} - ${endMonth} ${endDay}`;
+
+                return `Last Week's Changes (${dateRange})`;
+              })()}
             </p>
           </div>
           <button
@@ -478,7 +691,7 @@ export default function WeeklyTrends() {
           {/* VP Row */}
           <div className="bg-gradient-to-r from-blue-50 to-blue-100 rounded-xl border border-blue-200 p-4 mb-3">
             <p className="text-xs font-bold text-blue-900 uppercase tracking-wide mb-3">VP Forecast</p>
-            <div className="grid grid-cols-4 gap-4">
+            <div className="grid grid-cols-5 gap-4">
               <MetricCard
                 label="Pipeline"
                 value={fmtDollar(selectedWeek.vpPipeline)}
@@ -490,6 +703,12 @@ export default function WeeklyTrends() {
                 value={fmtDollar(selectedWeek.vpDealBacked)}
                 delta={previousWeek && fmtDelta(selectedWeek.vpDealBacked, previousWeek.vpDealBacked)}
                 subtitle="CW + Commit + ML"
+              />
+              <MetricCard
+                label="Weighted Pipe"
+                value={fmtDollar(selectedWeek.weightedPipe)}
+                delta={previousWeek && fmtDelta(selectedWeek.weightedPipe, previousWeek.weightedPipe)}
+                subtitle="CW + Stage Win Rates"
               />
               <MetricCard
                 label="Closed Won"
@@ -523,7 +742,7 @@ export default function WeeklyTrends() {
           {/* AIS Row */}
           <div className="bg-gradient-to-r from-purple-50 to-purple-100 rounded-xl border border-purple-200 p-4 mb-6">
             <p className="text-xs font-bold text-purple-900 uppercase tracking-wide mb-3">AIS Forecast</p>
-            <div className="grid grid-cols-4 gap-4">
+            <div className="grid grid-cols-5 gap-4">
               <MetricCard
                 label="Pipeline"
                 value={fmtDollar(selectedWeek.aisPipeline)}
@@ -535,6 +754,12 @@ export default function WeeklyTrends() {
                 value={fmtDollar(selectedWeek.aisDealBacked)}
                 delta={previousWeek && fmtDelta(selectedWeek.aisDealBacked, previousWeek.aisDealBacked)}
                 subtitle="CW + Commit + ML"
+              />
+              <MetricCard
+                label="Weighted Pipe"
+                value={fmtDollar(selectedWeek.weightedPipe)}
+                delta={previousWeek && fmtDelta(selectedWeek.weightedPipe, previousWeek.weightedPipe)}
+                subtitle="CW + Stage Win Rates"
               />
               <MetricCard
                 label="Closed Won"
@@ -586,6 +811,7 @@ export default function WeeklyTrends() {
               { key: 'aisCommit', label: 'AIS Commit', color: 'bg-purple-600' },
               { key: 'aisML', label: 'AIS Most Likely', color: 'bg-purple-400' },
               { key: 'aisBestCase', label: 'AIS Best Case', color: 'bg-purple-300' },
+              { key: 'weightedPipe', label: 'Weighted Pipe', color: 'bg-orange-600' },
               { key: 'closedWon', label: 'Closed Won', color: 'bg-green-600' },
             ].map(({ key, label, color }) => (
               <button
@@ -649,21 +875,30 @@ export default function WeeklyTrends() {
           return o.close_date >= weekStart && o.close_date <= filterEndDate;
         });
 
-        // Get closed won that contributes to the delta (day after previous week start to current point)
+        // Get closed won that contributes to the delta (between the two cutoff dates)
+        // This represents deals closed LAST WEEK (the week that just ended)
         const closedWonLastWeekFiltered = filteredClosedWon.filter((o) => {
-          const previousWeekStartStr = previousWeek.weekStart.toISOString().split('T')[0];
-          // Start from day AFTER previous week start
-          const dayAfterPrevStart = new Date(previousWeek.weekStart);
-          dayAfterPrevStart.setDate(dayAfterPrevStart.getDate() + 1);
-          const startStr = dayAfterPrevStart.toISOString().split('T')[0];
+          // Calculate previous week cutoff date (day before previous week starts)
+          const prevWeekCutoff = new Date(previousWeek.weekStart);
+          prevWeekCutoff.setDate(prevWeekCutoff.getDate() - 1);
+          const prevCutoffStr = prevWeekCutoff.toISOString().split('T')[0];
 
-          // End at current point (today if current week, week start if historical)
+          // Calculate current week cutoff date (yesterday for current week, day before for historical)
           const isCurrentWeek = now <= selectedWeek.weekEnd;
-          const nowStr = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString().split('T')[0];
-          const currentWeekStartStr = selectedWeek.weekStart.toISOString().split('T')[0];
-          const endStr = isCurrentWeek ? nowStr : currentWeekStartStr;
+          const nowLocal = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          let currCutoffStr: string;
+          if (isCurrentWeek) {
+            const yesterday = new Date(nowLocal);
+            yesterday.setDate(yesterday.getDate() - 1);
+            currCutoffStr = yesterday.toISOString().split('T')[0];
+          } else {
+            const currWeekCutoff = new Date(selectedWeek.weekStart);
+            currWeekCutoff.setDate(currWeekCutoff.getDate() - 1);
+            currCutoffStr = currWeekCutoff.toISOString().split('T')[0];
+          }
 
-          return o.close_date >= startStr && o.close_date <= endStr;
+          // Get deals closed AFTER previous cutoff and through current cutoff
+          return o.close_date > prevCutoffStr && o.close_date <= currCutoffStr;
         });
 
         return (
@@ -684,6 +919,10 @@ export default function WeeklyTrends() {
             load={load}
             excludedDealIds={excludedDealIds}
             quarterStartStr={quarterStartStr}
+            dealBackedReasons={dealBackedReasons}
+            setDealBackedReasons={setDealBackedReasons}
+            weeks={weeks}
+            selectedWeekIndex={selectedWeekIndex}
           />
         );
       })()}
@@ -762,6 +1001,7 @@ function TrendChart({
       visibleLines.aisCommit ? d.aisCommit : 0,
       visibleLines.aisML ? d.aisMostLikely : 0,
       visibleLines.aisBestCase ? d.aisBestCase : 0,
+      visibleLines.weightedPipe ? d.weightedPipe : 0,
       visibleLines.closedWon ? d.closedWon : 0,
     ])
   ) * 1.15;
@@ -856,6 +1096,12 @@ function TrendChart({
     const { solid, dotted } = createPaths((d) => d.aisBestCase, false);
     lines.push({ path: solid, color: '#c4b5fd', label: 'AIS Best Case', dotted: false });
     if (dotted) lines.push({ path: dotted, color: '#c4b5fd', label: 'AIS Best Case', dotted: true });
+  }
+
+  if (visibleLines.weightedPipe) {
+    const { solid, dotted } = createPaths((d) => d.weightedPipe, false);
+    lines.push({ path: solid, color: '#ea580c', label: 'Weighted Pipe', dotted: false });
+    if (dotted) lines.push({ path: dotted, color: '#ea580c', label: 'Weighted Pipe', dotted: true });
   }
 
   // Special handling for Closed Won - always render since it's calculated from close dates, not snapshots
@@ -1094,6 +1340,10 @@ function MovementBreakdown({
   load,
   excludedDealIds,
   quarterStartStr,
+  dealBackedReasons,
+  setDealBackedReasons,
+  weeks,
+  selectedWeekIndex,
 }: {
   currentWeek: WeekData;
   previousWeek: WeekData;
@@ -1104,13 +1354,17 @@ function MovementBreakdown({
   allOpps: ForecastOpp[];
   allClosedWon: ClosedWonOpp[];
   preparingPrint: boolean;
-  snapshots: Array<{ date: string; data: ForecastOpp[] }>;
+  snapshots: Array<{ date: string; importedAt: string; data: ForecastOpp[] }>;
   previousWeekStartStr: string;
   selectedRegion: 'All' | 'NA' | 'LATAM';
   opps: ForecastOpp[];
   load: () => void;
   excludedDealIds: Set<string>;
   quarterStartStr: string;
+  dealBackedReasons: Map<string, string | null>;
+  setDealBackedReasons: (reasons: Map<string, string | null>) => void;
+  weeks: Array<{ label: string; weekStart: Date; weekEnd: Date; start: Date; end: Date }>;
+  selectedWeekIndex: number;
 }) {
   const [expandedSection, setExpandedSection] = React.useState<string | null>(null);
 
@@ -1118,8 +1372,376 @@ function MovementBreakdown({
     setExpandedSection(expandedSection === section ? null : section);
   };
 
-  // Sort closed won by amount (highest to lowest)
-  const sortedClosedWon = [...closedWonThisWeek].sort((a, b) => b.bookings - a.bookings);
+  const exportDealBackedHtml = () => {
+    const prevDealBacked = previousWeek.vpDealBacked;
+    const currDealBacked = currentWeek.vpDealBacked;
+    const closedWonTotal = closedWonLastWeek.reduce((sum, o) => sum + (o.edited_bookings ?? o.bookings), 0);
+    const closedWonCount = new Set(closedWonLastWeek.map(o => o.crm_opportunity_id)).size;
+
+    // Calculate "As of EOD" dates for display
+    const prevWeekEndDate = new Date(previousWeek.weekStart);
+    prevWeekEndDate.setDate(prevWeekEndDate.getDate() - 1);
+    const prevWeekEOD = prevWeekEndDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+    const currWeekEndDate = new Date(currentWeek.weekStart);
+    currWeekEndDate.setDate(currWeekEndDate.getDate() - 1);
+    const currWeekEOD = currWeekEndDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+    // Calculate all the movement data
+    const prevDealBackedOpps = previousWeekOpps.filter(o => ['Commit', 'Most Likely'].includes(o.vp_deal_forecast));
+    const currDealBackedOpps = currentWeekOpps.filter(o => ['Commit', 'Most Likely'].includes(o.vp_deal_forecast));
+
+    const now = new Date();
+    const nowLocal = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const isCurrentWeek = now <= currentWeek.weekEnd;
+
+    // Calculate previous week end date (day before previous week starts)
+    const prevWeekEndDateFilter = new Date(previousWeek.weekStart);
+    prevWeekEndDateFilter.setDate(prevWeekEndDateFilter.getDate() - 1);
+    const previousWeekEndStr = prevWeekEndDateFilter.toISOString().split('T')[0];
+    const closedWonUpToPrevWeek = allClosedWon.filter(o =>
+      o.close_date >= quarterStartStr && o.close_date <= previousWeekEndStr
+    );
+
+    // Calculate current week end date (yesterday for current week, day before for historical)
+    let currentWeekEndStr: string;
+    if (isCurrentWeek) {
+      const yesterday = new Date(nowLocal);
+      yesterday.setDate(yesterday.getDate() - 1);
+      currentWeekEndStr = yesterday.toISOString().split('T')[0];
+    } else {
+      const currWeekEndDateFilter = new Date(currentWeek.weekStart);
+      currWeekEndDateFilter.setDate(currWeekEndDateFilter.getDate() - 1);
+      currentWeekEndStr = currWeekEndDateFilter.toISOString().split('T')[0];
+    }
+    const closedWonUpToCurrWeek = allClosedWon.filter(o =>
+      o.close_date >= quarterStartStr && o.close_date <= currentWeekEndStr
+    );
+
+    // Build previous week Deal Backed map
+    const prevDealBackedMap = new Map<string, {arr: number; forecast: string}>();
+    prevDealBackedOpps.forEach(o => {
+      const arr = o.ais_arr ?? o.product_arr_usd;
+      const existing = prevDealBackedMap.get(o.crm_opportunity_id);
+      prevDealBackedMap.set(o.crm_opportunity_id, {
+        arr: (existing?.arr || 0) + arr,
+        forecast: o.vp_deal_forecast
+      });
+    });
+    closedWonUpToPrevWeek.forEach(cw => {
+      const existing = prevDealBackedMap.get(cw.crm_opportunity_id);
+      prevDealBackedMap.set(cw.crm_opportunity_id, {
+        arr: (existing?.arr || 0) + (cw.edited_bookings ?? cw.bookings),
+        forecast: 'Closed Won'
+      });
+    });
+
+    // Build current week Deal Backed map
+    const currDealBackedMap = new Map<string, {arr: number; forecast: string}>();
+    currDealBackedOpps.forEach(o => {
+      const arr = o.ais_arr ?? o.product_arr_usd;
+      const existing = currDealBackedMap.get(o.crm_opportunity_id);
+      currDealBackedMap.set(o.crm_opportunity_id, {
+        arr: (existing?.arr || 0) + arr,
+        forecast: o.vp_deal_forecast
+      });
+    });
+    closedWonUpToCurrWeek.forEach(cw => {
+      const existing = currDealBackedMap.get(cw.crm_opportunity_id);
+      currDealBackedMap.set(cw.crm_opportunity_id, {
+        arr: (existing?.arr || 0) + (cw.edited_bookings ?? cw.bookings),
+        forecast: 'Closed Won'
+      });
+    });
+
+    // Build opp maps
+    const prevOppMap = new Map<string, ForecastOpp>();
+    previousWeekOpps.forEach(o => {
+      if (!prevOppMap.has(o.crm_opportunity_id)) {
+        prevOppMap.set(o.crm_opportunity_id, o);
+      }
+    });
+    closedWonUpToPrevWeek.forEach(cw => {
+      if (!prevOppMap.has(cw.crm_opportunity_id)) {
+        prevOppMap.set(cw.crm_opportunity_id, { ...cw, vp_deal_forecast: 'Closed Won', product_arr_usd: cw.bookings } as any);
+      }
+    });
+
+    const currOppMap = new Map<string, ForecastOpp>();
+    currentWeekOpps.forEach(o => {
+      if (!currOppMap.has(o.crm_opportunity_id)) {
+        currOppMap.set(o.crm_opportunity_id, o);
+      }
+    });
+    closedWonUpToCurrWeek.forEach(cw => {
+      if (!currOppMap.has(cw.crm_opportunity_id)) {
+        currOppMap.set(cw.crm_opportunity_id, { ...cw, vp_deal_forecast: 'Closed Won', product_arr_usd: cw.bookings } as any);
+      }
+    });
+
+    const enteredDealBacked: Array<{opp: ForecastOpp; arr: number; from: string; to: string}> = [];
+    const leftDealBacked: Array<{opp: ForecastOpp; arr: number; from: string; to: string}> = [];
+    const movedWithinDealBacked: Array<{opp: ForecastOpp; arr: number; from: string; to: string}> = [];
+    const arrChangesInDealBacked: Array<{opp: ForecastOpp; prevArr: number; currArr: number; delta: number}> = [];
+
+    // Calculate movements
+    const allOppIds = new Set([...prevDealBackedMap.keys(), ...currDealBackedMap.keys()]);
+    for (const oppId of allOppIds) {
+      if (excludedDealIds.has(oppId)) continue;
+
+      const wasInDB = prevDealBackedMap.has(oppId);
+      const isInDB = currDealBackedMap.has(oppId);
+
+      if (!wasInDB && isInDB) {
+        const curr = currDealBackedMap.get(oppId)!;
+        const opp = currOppMap.get(oppId)!;
+        const prevOpp = prevOppMap.get(oppId);
+        const from = prevOpp?.vp_deal_forecast || 'New';
+        enteredDealBacked.push({ opp, arr: curr.arr, from, to: curr.forecast });
+      } else if (wasInDB && !isInDB) {
+        const prev = prevDealBackedMap.get(oppId)!;
+        const prevOpp = prevOppMap.get(oppId)!;
+        const currOpp = currOppMap.get(oppId);
+        const to = currOpp?.vp_deal_forecast || 'Removed';
+        leftDealBacked.push({ opp: prevOpp, arr: prev.arr, from: prev.forecast, to });
+      } else if (wasInDB && isInDB) {
+        const prev = prevDealBackedMap.get(oppId)!;
+        const curr = currDealBackedMap.get(oppId)!;
+
+        if (prev.forecast !== curr.forecast) {
+          const opp = currOppMap.get(oppId)!;
+          movedWithinDealBacked.push({ opp, arr: curr.arr, from: prev.forecast, to: curr.forecast });
+        }
+
+        const delta = curr.arr - prev.arr;
+        if (Math.abs(delta) > 1000) {
+          const opp = currOppMap.get(oppId)!;
+          arrChangesInDealBacked.push({ opp, prevArr: prev.arr, currArr: curr.arr, delta });
+        }
+      }
+    }
+
+    enteredDealBacked.sort((a, b) => b.arr - a.arr);
+    leftDealBacked.sort((a, b) => b.arr - a.arr);
+    movedWithinDealBacked.sort((a, b) => b.arr - a.arr);
+    arrChangesInDealBacked.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Deal Backed Calculations - ${currentWeek.label} (${selectedRegion})</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 40px; background: #f9fafb; }
+    .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    h1 { font-size: 24px; margin: 0 0 8px 0; color: #111827; }
+    .subtitle { font-size: 14px; color: #6b7280; margin-bottom: 24px; }
+    .section { margin-bottom: 32px; }
+    .section-title { font-size: 18px; font-weight: 600; color: #111827; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid #e5e7eb; }
+    .deals-list { display: flex; flex-direction: column; gap: 12px; }
+    .deal-card { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; }
+    .deal-header { display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px; }
+    .deal-name { font-weight: 600; color: #111827; font-size: 15px; }
+    .deal-amount { font-weight: 700; color: #059669; font-size: 15px; }
+    .deal-details { font-size: 13px; color: #6b7280; line-height: 1.6; }
+    .forecast-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 500; margin-right: 8px; }
+    .badge-commit { background: #d1fae5; color: #065f46; }
+    .badge-ml { background: #fef3c7; color: #92400e; }
+    .badge-bc { background: #dbeafe; color: #1e40af; }
+    .badge-removed { background: #fee2e2; color: #991b1b; }
+    .summary { background: #f0f9ff; border: 2px solid #bae6fd; border-radius: 8px; padding: 20px; margin-bottom: 24px; }
+    .summary-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 15px; }
+    .summary-label { color: #0c4a6e; font-weight: 500; }
+    .summary-value { color: #0c4a6e; font-weight: 700; }
+    @media print { body { background: white; padding: 0; } .container { box-shadow: none; } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Deal Backed Calculations</h1>
+    <div class="subtitle">${currentWeek.label} | ${selectedRegion} Region</div>
+
+    <div class="summary">
+      <div class="summary-row"><span class="summary-label">Previous Week (As of EOD ${prevWeekEOD}):</span><span class="summary-value">${fmtDollar(prevDealBacked)}</span></div>
+      <div class="summary-row"><span class="summary-label">Current Week (As of EOD ${currWeekEOD}):</span><span class="summary-value">${fmtDollar(currDealBacked)}</span></div>
+      <div class="summary-row"><span class="summary-label">Week-over-Week Change:</span><span class="summary-value" style="color: ${currDealBacked - prevDealBacked >= 0 ? '#059669' : '#dc2626'}">${currDealBacked - prevDealBacked >= 0 ? '+' : ''}${fmtDollar(currDealBacked - prevDealBacked)}</span></div>
+    </div>
+
+    ${closedWonCount > 0 ? `
+    <div class="section">
+      <div class="section-title">✅ Closed Won Last Week (+${fmtDollar(closedWonTotal)})</div>
+      <div class="deals-list">
+        ${groupedClosedWon.map(deal => `
+          <div class="deal-card">
+            <div class="deal-header">
+              <div class="deal-name">${deal.account_name}</div>
+              <div class="deal-amount">+$${deal.totalBookings.toLocaleString()}</div>
+            </div>
+            <div class="deal-details">
+              ${deal.ae_name} • Closed ${new Date(deal.close_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+            </div>
+            ${deal.products.length > 1 ? `
+              <div style="margin-top: 8px; margin-left: 12px; font-size: 12px; color: #6b7280;">
+                ${deal.products.map(prod => `
+                  <div style="display: flex; justify-between; margin-bottom: 4px;">
+                    <span>↳ ${prod.product}</span>
+                    <span style="font-weight: 500;">$${prod.bookings.toLocaleString()}</span>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
+          </div>
+        `).join('')}
+      </div>
+    </div>
+    ` : ''}
+
+    <div class="section">
+      <div class="section-title">📊 Deal Backed Pipeline Movement Summary</div>
+      <div style="background: #f9fafb; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+        <div style="display: flex; justify-between; margin-bottom: 8px;">
+          <span style="color: #6b7280;">Left Deal Backed:</span>
+          <span style="color: #dc2626; font-weight: 600;">-${fmtDollar(leftDealBacked.reduce((s, d) => s + d.arr, 0))}</span>
+        </div>
+        <div style="display: flex; justify-between; margin-bottom: 8px;">
+          <span style="color: #6b7280;">Entered Deal Backed:</span>
+          <span style="color: #059669; font-weight: 600;">+${fmtDollar(enteredDealBacked.reduce((s, d) => s + d.arr, 0))}</span>
+        </div>
+        ${arrChangesInDealBacked.length > 0 ? `
+        <div style="display: flex; justify-between; margin-bottom: 8px;">
+          <span style="color: #6b7280;">ARR Changes:</span>
+          <span style="font-weight: 600; color: ${arrChangesInDealBacked.reduce((s, d) => s + d.delta, 0) >= 0 ? '#059669' : '#dc2626'}">
+            ${arrChangesInDealBacked.reduce((s, d) => s + d.delta, 0) >= 0 ? '+' : ''}${fmtDollar(arrChangesInDealBacked.reduce((s, d) => s + d.delta, 0))}
+          </span>
+        </div>
+        ` : ''}
+        <div style="display: flex; justify-between; border-top: 2px solid #d1d5db; padding-top: 8px; margin-top: 8px;">
+          <span style="color: #111827; font-weight: 600;">Net Pipeline Change:</span>
+          <span style="font-weight: 700; color: ${enteredDealBacked.reduce((s, d) => s + d.arr, 0) - leftDealBacked.reduce((s, d) => s + d.arr, 0) + arrChangesInDealBacked.reduce((s, d) => s + d.delta, 0) >= 0 ? '#059669' : '#dc2626'}">
+            ${enteredDealBacked.reduce((s, d) => s + d.arr, 0) - leftDealBacked.reduce((s, d) => s + d.arr, 0) + arrChangesInDealBacked.reduce((s, d) => s + d.delta, 0) >= 0 ? '+' : ''}${fmtDollar(enteredDealBacked.reduce((s, d) => s + d.arr, 0) - leftDealBacked.reduce((s, d) => s + d.arr, 0) + arrChangesInDealBacked.reduce((s, d) => s + d.delta, 0))}
+          </span>
+        </div>
+      </div>
+    </div>
+
+    ${leftDealBacked.length > 0 ? `
+    <div class="section">
+      <div class="section-title">⬇️ Left Deal Backed (${leftDealBacked.length} deals) -${fmtDollar(leftDealBacked.reduce((s, d) => s + d.arr, 0))}</div>
+      <div class="deals-list">
+        ${leftDealBacked.map(item => {
+          const reason = dealBackedReasons.get(item.opp.crm_opportunity_id);
+          return `
+          <div class="deal-card">
+            <div class="deal-header">
+              <div class="deal-name">${item.opp.account_name}</div>
+              <div class="deal-amount" style="color: #dc2626;">-${fmtDollar(item.arr)}</div>
+            </div>
+            <div class="deal-details">
+              <span class="forecast-badge badge-removed">${item.from} → ${item.to}</span>
+              ${item.opp.manager_name || item.opp.ae_name} ${reason ? `• <strong>${reason}</strong>` : ''}
+            </div>
+          </div>
+        `}).join('')}
+      </div>
+    </div>
+    ` : ''}
+
+    ${enteredDealBacked.length > 0 ? `
+    <div class="section">
+      <div class="section-title">⬆️ Entered Deal Backed (${enteredDealBacked.length} deals) +${fmtDollar(enteredDealBacked.reduce((s, d) => s + d.arr, 0))}</div>
+      <div class="deals-list">
+        ${enteredDealBacked.map(item => `
+          <div class="deal-card">
+            <div class="deal-header">
+              <div class="deal-name">${item.opp.account_name}</div>
+              <div class="deal-amount">+${fmtDollar(item.arr)}</div>
+            </div>
+            <div class="deal-details">
+              <span class="forecast-badge ${item.to === 'Commit' ? 'badge-commit' : 'badge-ml'}">${item.from} → ${item.to}</span>
+              ${item.opp.manager_name || item.opp.ae_name}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+    ` : ''}
+
+    ${movedWithinDealBacked.length > 0 ? `
+    <div class="section">
+      <div class="section-title">↔️ Moved Within Deal Backed (${movedWithinDealBacked.length} deals) No net impact</div>
+      <div class="deals-list">
+        ${movedWithinDealBacked.map(item => `
+          <div class="deal-card">
+            <div class="deal-header">
+              <div class="deal-name">${item.opp.account_name}</div>
+              <div class="deal-amount">${fmtDollar(item.arr)}</div>
+            </div>
+            <div class="deal-details">
+              <span class="forecast-badge badge-ml">${item.from} → ${item.to}</span>
+              ${item.opp.manager_name || item.opp.ae_name}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+    ` : ''}
+
+    ${arrChangesInDealBacked.length > 0 ? `
+    <div class="section">
+      <div class="section-title">💰 ARR Changes Within Deal Backed (${arrChangesInDealBacked.length} deals) ${fmtDollar(arrChangesInDealBacked.reduce((s, d) => s + d.delta, 0))}</div>
+      <div class="deals-list">
+        ${arrChangesInDealBacked.map(item => `
+          <div class="deal-card">
+            <div class="deal-header">
+              <div class="deal-name">${item.opp.account_name}</div>
+              <div class="deal-amount" style="color: ${item.delta >= 0 ? '#059669' : '#dc2626'}">${item.delta >= 0 ? '+' : ''}${fmtDollar(item.delta)}</div>
+            </div>
+            <div class="deal-details">
+              ${fmtDollar(item.prevArr)} → ${fmtDollar(item.currArr)} • ${item.opp.manager_name || item.opp.ae_name}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+    ` : ''}
+
+  </div>
+</body>
+</html>`;
+
+    // Create blob and download
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `deal-backed-${currentWeek.label.replace(/\s+/g, '-')}-${selectedRegion}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // Group closed won by opportunity and calculate totals
+  const groupedClosedWon = Array.from(
+    closedWonLastWeek.reduce((map, deal) => {
+      const existing = map.get(deal.crm_opportunity_id);
+      if (existing) {
+        existing.products.push({ product: deal.product, bookings: deal.bookings });
+        existing.totalBookings += deal.bookings;
+      } else {
+        map.set(deal.crm_opportunity_id, {
+          crm_opportunity_id: deal.crm_opportunity_id,
+          account_name: deal.account_name,
+          ae_name: deal.ae_name,
+          close_date: deal.close_date,
+          totalBookings: deal.bookings,
+          products: [{ product: deal.product, bookings: deal.bookings }],
+        });
+      }
+      return map;
+    }, new Map<string, { crm_opportunity_id: string; account_name: string; ae_name: string; close_date: string; totalBookings: number; products: Array<{ product: string; bookings: number }> }>()).values()
+  ).sort((a, b) => b.totalBookings - a.totalBookings);
 
   // Analyze deal backed movement
   const analyzeDealBackedMovement = () => {
@@ -1386,9 +2008,18 @@ function MovementBreakdown({
   const currDealBacked = currentWeek.vpDealBacked;
   const dealBackedChange = currDealBacked - prevDealBacked;
 
+  // Calculate "As of EOD" dates for display
+  const prevWeekEndDate = new Date(previousWeek.weekStart);
+  prevWeekEndDate.setDate(prevWeekEndDate.getDate() - 1); // Day before previous week starts
+  const prevWeekEOD = prevWeekEndDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+  const currWeekEndDate = new Date(currentWeek.weekStart);
+  currWeekEndDate.setDate(currWeekEndDate.getDate() - 1); // Day before current week starts (yesterday for current week)
+  const currWeekEOD = currWeekEndDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
   return (
     <div className="space-y-4">
-      {/* Closed Won This Week */}
+      {/* Closed Won Last Week */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <button
           onClick={() => toggleSection('closedWon')}
@@ -1397,38 +2028,50 @@ function MovementBreakdown({
           <div className="flex items-center gap-3">
             <span className="text-2xl">{expandedSection === 'closedWon' ? '▼' : '▶'}</span>
             <div className="text-left">
-              <h3 className="text-base font-bold text-gray-900">Closed Won This Week</h3>
+              <h3 className="text-base font-bold text-gray-900">Closed Won Last Week</h3>
               <p className="text-xs text-gray-500 mt-0.5">
-                {currentWeek.closedWonThisWeekCount} deal{currentWeek.closedWonThisWeekCount !== 1 ? 's' : ''} · {fmtDollar(currentWeek.closedWonThisWeek)}
+                {new Set(closedWonLastWeek.map(o => o.crm_opportunity_id)).size} deal{new Set(closedWonLastWeek.map(o => o.crm_opportunity_id)).size !== 1 ? 's' : ''} · {fmtDollar(closedWonLastWeek.reduce((sum, o) => sum + (o.edited_bookings ?? o.bookings), 0))}
               </p>
             </div>
           </div>
         </button>
         {(expandedSection === 'closedWon' || preparingPrint) && (
           <div className="px-6 pb-6 border-t border-gray-100" data-collapsible-content>
-            <div className="space-y-2 mt-4">
-              {sortedClosedWon.length === 0 ? (
-                <p className="text-sm text-gray-400 py-4">No closed won deals this week</p>
+            <div className="space-y-3 mt-4">
+              {groupedClosedWon.length === 0 ? (
+                <p className="text-sm text-gray-400 py-4">No closed won deals last week</p>
               ) : (
-                sortedClosedWon.map((deal, i) => (
-                  <div key={i} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium text-gray-900 text-sm">{deal.account_name}</p>
-                        <button
-                          onClick={() => window.api.openExternal(sfdcUrl(deal.crm_opportunity_id))}
-                          className="text-blue-500 hover:text-blue-700 text-xs"
-                          title="Open in Salesforce"
-                        >
-                          SFDC ↗
-                        </button>
+                groupedClosedWon.map((deal, i) => (
+                  <div key={i} className="border-b border-gray-100 pb-3 last:border-0">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="font-semibold text-gray-900 text-sm">{deal.account_name}</p>
+                          <button
+                            onClick={() => window.api.openExternal(sfdcUrl(deal.crm_opportunity_id))}
+                            className="text-blue-500 hover:text-blue-700 text-xs"
+                            title="Open in Salesforce"
+                          >
+                            SFDC ↗
+                          </button>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-0.5">{deal.ae_name}</p>
                       </div>
-                      <p className="text-xs text-gray-500">{deal.ae_name} · {deal.product}</p>
+                      <div className="text-right">
+                        <p className="font-bold text-gray-900 text-sm">{fmtDollar(deal.totalBookings)}</p>
+                        <p className="text-xs text-gray-500">{fmtDateShort(deal.close_date)}</p>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <p className="font-semibold text-gray-900 text-sm">{fmtDollar(deal.bookings)}</p>
-                      <p className="text-xs text-gray-500">{fmtDateShort(deal.close_date)}</p>
-                    </div>
+                    {deal.products.length > 1 && (
+                      <div className="mt-2 ml-4 space-y-1">
+                        {deal.products.map((prod, j) => (
+                          <div key={j} className="flex items-center justify-between text-xs">
+                            <span className="text-gray-600">↳ {prod.product}</span>
+                            <span className="text-gray-700 font-medium">{fmtDollar(prod.bookings)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))
               )}
@@ -1493,11 +2136,11 @@ function MovementBreakdown({
 
       {/* Deal Backed Calculations */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <button
-          onClick={() => toggleSection('calculations')}
-          className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
-        >
-          <div className="flex items-center gap-3">
+        <div className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors">
+          <button
+            onClick={() => toggleSection('calculations')}
+            className="flex items-center gap-3 flex-1"
+          >
             <span className="text-2xl">{expandedSection === 'calculations' ? '▼' : '▶'}</span>
             <div className="text-left">
               <h3 className="text-base font-bold text-gray-900">Deal Backed Calculations</h3>
@@ -1505,18 +2148,27 @@ function MovementBreakdown({
                 CW + Commit + ML: {fmtDollar(prevDealBacked)} → {fmtDollar(currDealBacked)}
               </p>
             </div>
+          </button>
+          <div className="flex items-center gap-3">
+            <div className={`text-sm font-semibold ${dealBackedChange >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+              {dealBackedChange >= 0 ? '+' : ''}
+              {fmtDollar(dealBackedChange)}
+            </div>
+            <button
+              onClick={(e) => { e.stopPropagation(); exportDealBackedHtml(); }}
+              className="px-3 py-1.5 text-sm font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition-all"
+              title="Export to HTML"
+            >
+              📤 Export
+            </button>
           </div>
-          <div className={`text-sm font-semibold ${dealBackedChange >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-            {dealBackedChange >= 0 ? '+' : ''}
-            {fmtDollar(dealBackedChange)}
-          </div>
-        </button>
+        </div>
         {(expandedSection === 'calculations' || preparingPrint) && (
           <div className="px-6 pb-6 border-t border-gray-100" data-collapsible-content>
             <div className="py-4">
               {/* Previous Week Breakdown */}
               <div className="mb-6">
-                <h5 className="text-sm font-semibold text-gray-700 mb-2">Previous Week ({previousWeek.label})</h5>
+                <h5 className="text-sm font-semibold text-gray-700 mb-2">Previous Week (As of EOD {prevWeekEOD})</h5>
                 <div className="space-y-1 text-sm">
                   <div className="flex justify-between">
                     <span className="text-gray-600">Closed Won:</span>
@@ -1539,7 +2191,7 @@ function MovementBreakdown({
 
               {/* Current Week Breakdown */}
               <div className="mb-6">
-                <h5 className="text-sm font-semibold text-gray-700 mb-2">Current Week ({currentWeek.label})</h5>
+                <h5 className="text-sm font-semibold text-gray-700 mb-2">Current Week (As of EOD {currWeekEOD})</h5>
                 <div className="space-y-1 text-sm">
                   <div className="flex justify-between">
                     <span className="text-gray-600">Closed Won:</span>
@@ -1602,28 +2254,39 @@ function MovementBreakdown({
                 );
 
                 // Get cumulative Closed Won deals up to each week (from quarter start)
-                // Use week START dates (Monday) for Monday-to-Monday comparison
-                const previousWeekStartStr = previousWeek.weekStart.toISOString().split('T')[0];
-                const currentWeekStartStr = currentWeek.weekStart.toISOString().split('T')[0];
-
-                // Determine if we're viewing current week (use today) or historical week (use week start)
+                // Use day BEFORE week starts to match the updated date logic
                 const now = new Date();
                 const nowLocal = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-                const nowStr = nowLocal.toISOString().split('T')[0];
                 const isCurrentWeek = now <= currentWeek.weekEnd;
+
+                // Calculate previous week end date (day before previous week starts)
+                const prevWeekEndDate = new Date(previousWeek.weekStart);
+                prevWeekEndDate.setDate(prevWeekEndDate.getDate() - 1);
+                const previousWeekEndStr = prevWeekEndDate.toISOString().split('T')[0];
+
+                // Calculate current week end date (yesterday for current week, day before for historical)
+                let currentWeekEndStr: string;
+                if (isCurrentWeek) {
+                  const yesterday = new Date(nowLocal);
+                  yesterday.setDate(yesterday.getDate() - 1);
+                  currentWeekEndStr = yesterday.toISOString().split('T')[0];
+                } else {
+                  const currWeekEndDate = new Date(currentWeek.weekStart);
+                  currWeekEndDate.setDate(currWeekEndDate.getDate() - 1);
+                  currentWeekEndStr = currWeekEndDate.toISOString().split('T')[0];
+                }
 
                 // Use the same quarter start date as the top-level calculation (passed in as prop)
                 // This ensures consistency between "Total Deal Backed change" and "Net Pipeline Change"
 
-                // Closed won from quarter start to previous week start (cumulative through March 16)
+                // Closed won from quarter start to day before previous week (cumulative through EOD day before)
                 const closedWonUpToPrevWeek = allClosedWon.filter(o =>
-                  o.close_date >= quarterStartStr && o.close_date <= previousWeekStartStr
+                  o.close_date >= quarterStartStr && o.close_date <= previousWeekEndStr
                 );
 
-                // Closed won from quarter start to current point (use today if current week, week start if historical)
-                const currentWeekFilterDate = isCurrentWeek ? nowStr : currentWeekStartStr;
+                // Closed won from quarter start to day before current week (yesterday or EOD day before)
                 const closedWonUpToCurrWeek = allClosedWon.filter(o =>
-                  o.close_date >= quarterStartStr && o.close_date <= currentWeekFilterDate
+                  o.close_date >= quarterStartStr && o.close_date <= currentWeekEndStr
                 );
 
                 // Build previous week Deal Backed map (pipeline opps + cumulative closed won)
@@ -1864,48 +2527,85 @@ function MovementBreakdown({
                           <span className="ml-2 text-red-600">-{fmtDollar(leftDealBacked.reduce((s, d) => s + d.arr, 0))}</span>
                         </h6>
                         <div className="space-y-2">
-                          {leftDealBacked.map((item, i) => (
-                            <div key={i} className="text-xs bg-white p-2 rounded border border-gray-200">
-                              <div className="flex justify-between items-start">
-                                <div className="flex-1">
-                                  <div className="flex items-center gap-2">
-                                    <span className="font-medium text-gray-900">{item.opp.account_name}</span>
+                          {leftDealBacked.map((item, i) => {
+                            const showReasonDropdown = item.to === 'Removed';
+                            const currentReason = dealBackedReasons.get(item.opp.crm_opportunity_id);
+
+                            return (
+                              <div key={i} className="text-xs bg-white p-2 rounded border border-gray-200">
+                                <div className="flex justify-between items-start gap-2">
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-medium text-gray-900">{item.opp.account_name}</span>
+                                      <button
+                                        onClick={() => window.api.openExternal(sfdcUrl(item.opp.crm_opportunity_id))}
+                                        className="text-xs text-blue-600 hover:text-blue-800 hover:underline"
+                                        title="Open in Salesforce"
+                                      >
+                                        SFDC ↗
+                                      </button>
+                                    </div>
+                                    <div className="text-gray-400 text-xs mt-0.5">
+                                      {item.from} → {item.to}
+                                    </div>
+                                    {showReasonDropdown && (
+                                      <div className="mt-1.5">
+                                        <select
+                                          value={currentReason || ''}
+                                          onChange={async (e) => {
+                                            const value = e.target.value === '' ? null : e.target.value;
+
+                                            try {
+                                              // Use previousWeekStartStr from the parent IIFE scope
+                                              const prevSnapshot = snapshots.filter((s) => s.date <= previousWeekStartStr).sort((a, b) => b.date.localeCompare(a.date))[0];
+
+                                              if (prevSnapshot && prevSnapshot.importedAt) {
+                                                await window.api.setDealBackedReason(item.opp.crm_opportunity_id, prevSnapshot.importedAt, value);
+                                                const newReasons = new Map(dealBackedReasons);
+                                                newReasons.set(item.opp.crm_opportunity_id, value);
+                                                setDealBackedReasons(newReasons);
+                                              }
+                                            } catch (err) {
+                                              console.error('Error saving reason:', err);
+                                            }
+                                          }}
+                                          className="text-xs px-2 py-1 border border-gray-300 rounded bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                        >
+                                          <option value="">Select reason...</option>
+                                          <option value="Moved from C/ML to BC">Moved from C/ML to BC</option>
+                                          <option value="Pushed to next quarter">Pushed to next quarter</option>
+                                          <option value="Opp Lost">Opp Lost</option>
+                                          <option value="AI Products Removed">AI Products Removed</option>
+                                          <option value="Other">Other</option>
+                                        </select>
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <span className="text-red-700 font-medium">-{fmtDollar(item.arr)}</span>
                                     <button
-                                      onClick={() => window.api.openExternal(sfdcUrl(item.opp.crm_opportunity_id))}
-                                      className="text-xs text-blue-600 hover:text-blue-800 hover:underline"
-                                      title="Open in Salesforce"
+                                      onClick={async (e) => {
+                                        e.stopPropagation();
+                                        try {
+                                          console.log('Excluding deal:', item.opp.crm_opportunity_id);
+                                          await window.api.toggleExcludeFromAnalysis(item.opp.crm_opportunity_id, true);
+                                          console.log('Excluded successfully, reloading...');
+                                          await load();
+                                        } catch (err) {
+                                          console.error('Error excluding deal:', err);
+                                          alert(`Failed to exclude: ${err}`);
+                                        }
+                                      }}
+                                      className="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded text-gray-600"
+                                      title="Exclude from analysis (data error)"
                                     >
-                                      SFDC ↗
+                                      Exclude
                                     </button>
                                   </div>
-                                  <div className="text-gray-400 text-xs mt-0.5">
-                                    {item.from} → {item.to}
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <span className="text-red-700 font-medium">-{fmtDollar(item.arr)}</span>
-                                  <button
-                                    onClick={async (e) => {
-                                      e.stopPropagation();
-                                      try {
-                                        console.log('Excluding deal:', item.opp.crm_opportunity_id);
-                                        await window.api.toggleExcludeFromAnalysis(item.opp.crm_opportunity_id, true);
-                                        console.log('Excluded successfully, reloading...');
-                                        await load();
-                                      } catch (err) {
-                                        console.error('Error excluding deal:', err);
-                                        alert(`Failed to exclude: ${err}`);
-                                      }
-                                    }}
-                                    className="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded text-gray-600"
-                                    title="Exclude from analysis (data error)"
-                                  >
-                                    Exclude
-                                  </button>
                                 </div>
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
                     )}

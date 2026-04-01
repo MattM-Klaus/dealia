@@ -13,6 +13,7 @@ import {
   getNotificationLog,
   getForecastOpps,
   getClosedWonOpps,
+  getClosedLostOpps,
   updateClosedWonBookings,
   updateForecastAisField,
   getAnalyticsData,
@@ -35,6 +36,8 @@ import {
   getCommissionPeriods,
   clearCommissionData,
   setInvestigationStatus,
+  getDealBackedReasons,
+  setDealBackedReason,
 } from './database';
 import type { AisForecast, ContactStatus } from '../shared/types';
 import { sendTestNotification } from './slack';
@@ -42,6 +45,8 @@ import { runRenewalCheck } from './scheduler';
 import { importCsvFile } from './csv-import';
 import { importForecastCsv, importClosedWonCsv, importHistoricalCsv, importHistoricalClosedWonCsv } from './forecast-import';
 import { syncFromTableau } from './tableau-api';
+import { syncFromSnowflake } from './snowflake-api';
+import { importSnowflakeCsv } from './snowflake-import';
 import { importXactlyCSV, importTableauCSV } from './commission-import';
 import type { AccountFormData, AppSettings } from '../shared/types';
 
@@ -126,6 +131,7 @@ export function registerIpcHandlers(): void {
   // Forecast
   ipcMain.handle('forecast:getOpps', () => getForecastOpps());
   ipcMain.handle('forecast:getClosedWon', () => getClosedWonOpps());
+  ipcMain.handle('forecast:getClosedLost', () => getClosedLostOpps());
   ipcMain.handle('forecast:getPipelineSnapshots', () => getPipelineSnapshots());
 
   ipcMain.handle('forecast:importPipeline', (_event, filePath: string) => {
@@ -234,6 +240,60 @@ export function registerIpcHandlers(): void {
     }
   });
 
+  // Snowflake sync
+  ipcMain.handle('snowflake:sync', async () => {
+    console.log('[snowflake:sync] Starting Snowflake sync...');
+
+    // Fetch CSV from Google Sheets
+    const result = await syncFromSnowflake();
+
+    if (!result.success || !result.csvPath) {
+      return { success: false, error: result.error || 'Failed to sync from Snowflake' };
+    }
+
+    // Save backup before importing
+    const backupFilename = saveBackupCsv(result.csvPath);
+
+    // Import the CSV data
+    try {
+      const importResult = importSnowflakeCsv(result.csvPath);
+
+      // Calculate total pipeline
+      const opps = getForecastOpps();
+      const totalPipeline = opps.reduce((sum, opp) => sum + (opp.ais_arr ?? opp.product_arr_usd), 0);
+
+      // Count rows from CSV
+      const csvContent = fs.readFileSync(result.csvPath, 'utf-8');
+      const rowCount = csvContent.split('\n').filter(line => line.trim()).length - 1;
+
+      // Log the import
+      logImport({
+        source_type: 'snowflake_sync',
+        backup_filename: backupFilename,
+        row_count: rowCount,
+        inserted_count: importResult.inserted,
+        updated_count: importResult.updated,
+        total_pipeline: totalPipeline,
+      });
+
+      // Snapshot the current state
+      snapshotCurrentState();
+
+      // Clean up the temp file
+      try {
+        fs.unlinkSync(result.csvPath);
+      } catch (err) {
+        console.error('[snowflake:sync] Failed to delete temp file:', err);
+      }
+
+      console.log(`[snowflake:sync] Import complete: ${importResult.inserted} records`);
+      return { success: true, result: importResult };
+    } catch (err: any) {
+      console.error('[snowflake:sync] Import failed:', err);
+      return { success: false, error: `Import failed: ${err.message}` };
+    }
+  });
+
   // Quotas
   ipcMain.handle('quotas:getAll', () => getQuotas());
   ipcMain.handle('quotas:upsert', (_event, ai_ae: string, data: { region?: string; quota: number; q1_target?: number; q2_target?: number; q3_target?: number; q4_target?: number }) => { upsertQuota(ai_ae, data); return { ok: true }; });
@@ -318,7 +378,7 @@ ${context}`;
   });
 
   // PDF Export
-  ipcMain.handle('pdf:export', async (event, defaultFilename: string) => {
+  ipcMain.handle('pdf:export', async (event, defaultFilename: string, fullHeight: number) => {
     try {
       // Show save dialog
       const result = await dialog.showSaveDialog({
@@ -331,17 +391,41 @@ ${context}`;
         return { success: false, canceled: true };
       }
 
-      // Generate PDF from current page
+      // Get the window and store original size
+      const win = event.sender.getOwnerBrowserWindow();
+      if (!win) throw new Error('No window found');
+
+      const originalBounds = win.getBounds();
+
+      // Resize window to fit all content (add 100px buffer for safety)
+      const targetHeight = Math.min(fullHeight + 100, 10000); // Cap at 10000px
+      win.setBounds({
+        x: originalBounds.x,
+        y: originalBounds.y,
+        width: originalBounds.width,
+        height: targetHeight,
+      });
+
+      // Wait for window resize
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      // Generate PDF from full page
       const pdfData = await event.sender.printToPDF({
         printBackground: true,
+        landscape: true,
         pageSize: 'Letter',
         margins: {
-          top: 0.5,
-          bottom: 0.5,
-          left: 0.5,
-          right: 0.5,
+          top: 0.4,
+          bottom: 0.4,
+          left: 0.4,
+          right: 0.4,
         },
+        preferCSSPageSize: false,
+        scale: 0.75,
       });
+
+      // Restore original window size
+      win.setBounds(originalBounds);
 
       // Save PDF to file
       fs.writeFileSync(result.filePath, pdfData);
@@ -364,6 +448,13 @@ ${context}`;
   ipcMain.handle('commission:clearData', (_event, period: string) => { clearCommissionData(period); return { ok: true }; });
   ipcMain.handle('commission:setInvestigationStatus', (_event, opportunityNumber: string, period: string, status: string | null) => {
     setInvestigationStatus(opportunityNumber, period, status);
+    return { ok: true };
+  });
+
+  // Deal Backed Reason Tracking
+  ipcMain.handle('dealBacked:getReasons', (_event, importedAt: string) => getDealBackedReasons(importedAt));
+  ipcMain.handle('dealBacked:setReason', (_event, crmOpportunityId: string, importedAt: string, reason: string | null) => {
+    setDealBackedReason(crmOpportunityId, importedAt, reason);
     return { ok: true };
   });
 }

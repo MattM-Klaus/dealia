@@ -511,12 +511,24 @@ export default function CommissionReconciliation() {
                 </th>
                 <th
                   className="py-3 px-2 font-semibold text-gray-700 cursor-pointer hover:bg-gray-50 select-none"
-                  style={{ width: '100px' }}
-                  onClick={() => handleSort('close_date')}
+                  style={{ width: '105px' }}
+                  onClick={() => handleSort('tableau_close_date')}
                 >
                   <div className="flex items-center gap-1">
-                    Close Date
-                    {sortColumn === 'close_date' && (
+                    Close Date - Tableau
+                    {sortColumn === 'tableau_close_date' && (
+                      <span className="text-xs">{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </th>
+                <th
+                  className="py-3 px-2 font-semibold text-gray-700 cursor-pointer hover:bg-gray-50 select-none"
+                  style={{ width: '105px' }}
+                  onClick={() => handleSort('xactly_close_date')}
+                >
+                  <div className="flex items-center gap-1">
+                    Close Date - Xactly
+                    {sortColumn === 'xactly_close_date' && (
                       <span className="text-xs">{sortDirection === 'asc' ? '↑' : '↓'}</span>
                     )}
                   </div>
@@ -598,7 +610,8 @@ export default function CommissionReconciliation() {
                     </div>
                   </td>
                   <td className="py-2 px-2 text-gray-700 truncate" style={{ width: '140px', maxWidth: '140px' }} title={row.ae_name}>{row.ae_name}</td>
-                  <td className="py-2 px-2 text-gray-700" style={{ width: '100px' }}>{row.close_date}</td>
+                  <td className="py-2 px-2 text-gray-700 text-xs" style={{ width: '105px' }}>{row.tableau_close_date || '—'}</td>
+                  <td className="py-2 px-2 text-gray-700 text-xs" style={{ width: '105px' }}>{row.xactly_close_date || '—'}</td>
                   <td className="py-2 px-2" style={{ width: '100px' }}>
                     <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
                       row.issue_type === 'missing_in_xactly'

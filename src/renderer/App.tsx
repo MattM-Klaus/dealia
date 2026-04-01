@@ -7,6 +7,7 @@ import Analytics from './pages/Analytics';
 import Dealia from './pages/Dealia';
 import Pipeline from './pages/Pipeline';
 import ClosedWon from './pages/ClosedWon';
+import ClosedLost from './pages/ClosedLost';
 import ForecastDashboard from './pages/ForecastDashboard';
 import Settings from './pages/Settings';
 import History from './pages/History';
@@ -24,6 +25,7 @@ export default function App() {
             <Route path="/accounts" element={<Accounts />} />
             <Route path="/pipeline" element={<Pipeline />} />
             <Route path="/closed-won" element={<ClosedWon />} />
+            <Route path="/closed-lost" element={<ClosedLost />} />
             <Route path="/forecast-dashboard" element={<ForecastDashboard />} />
             <Route path="/analytics" element={<Analytics />} />
             <Route path="/weekly-trends" element={<WeeklyTrends />} />

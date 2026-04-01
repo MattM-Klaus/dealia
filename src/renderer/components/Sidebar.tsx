@@ -7,6 +7,7 @@ const links = [
   { to: '/forecast-dashboard', label: 'Forecast Dashboard',  icon: '🎯' },
   { to: '/pipeline',           label: 'Pipeline',            icon: '📈' },
   { to: '/closed-won',         label: 'Closed Won',          icon: '✅' },
+  { to: '/closed-lost',        label: 'Closed Lost',         icon: '❌' },
   { to: '/analytics',          label: 'Analytics',           icon: '🔍' },
   { to: '/weekly-trends',      label: 'What Changed?',       icon: '📊' },
   { to: '/commission-reconciliation', label: 'Commission Recon', icon: '💰' },

@@ -22,6 +22,7 @@ interface TableauRow {
   'Product': string;
   'Bookings': string;
   'Closedate': string;
+  'Raw Closedate': string;
 }
 
 function parseAmount(value: string): number {
@@ -154,7 +155,7 @@ export async function importTableauCSV(filePath: string, period: string): Promis
               manager_name: row['Manager Name'] || '',
               product: row['Product'] || '',
               bookings: parseAmount(row['Bookings']),
-              close_date: parseDate(row['Closedate']),
+              close_date: parseDate(row['Raw Closedate'] || row['Closedate']), // Use Raw Closedate, fallback to Closedate
               period,
             }))
             .filter(row => periodMatchesDate(period, row.close_date)); // Only include deals that match the period

@@ -26,12 +26,14 @@ contextBridge.exposeInMainWorld('api', {
   // Forecast
   getForecastOpps: () => ipcRenderer.invoke('forecast:getOpps'),
   getClosedWonOpps: () => ipcRenderer.invoke('forecast:getClosedWon'),
+  getClosedLostOpps: () => ipcRenderer.invoke('forecast:getClosedLost'),
   getPipelineSnapshots: () => ipcRenderer.invoke('forecast:getPipelineSnapshots'),
   importForecastPipeline: (filePath: string) => ipcRenderer.invoke('forecast:importPipeline', filePath),
   importForecastClosedWon: (filePath: string) => ipcRenderer.invoke('forecast:importClosedWon', filePath),
   importHistoricalCsv: (filePath: string, customDate: string) => ipcRenderer.invoke('forecast:importHistorical', filePath, customDate),
   importHistoricalClosedWonCsv: (filePath: string, customDate: string) => ipcRenderer.invoke('forecast:importHistoricalClosedWon', filePath, customDate),
   syncFromTableau: () => ipcRenderer.invoke('tableau:sync'),
+  syncFromSnowflake: () => ipcRenderer.invoke('snowflake:sync'),
   getAnalyticsData: (): Promise<AnalyticsData> => ipcRenderer.invoke('analytics:getData'),
   getHistoricalState: (asOfDate: string): Promise<ForecastOpp[] | null> => ipcRenderer.invoke('analytics:getHistoricalState', asOfDate),
   getSnapshotsBetweenDates: (fromDate: string, toDate: string): Promise<{ start: ForecastOpp[] | null; end: ForecastOpp[] | null }> => ipcRenderer.invoke('analytics:getSnapshotsBetweenDates', fromDate, toDate),
@@ -71,8 +73,8 @@ contextBridge.exposeInMainWorld('api', {
   openBackupCsv: (filename: string) => ipcRenderer.invoke('importHistory:openBackup', filename),
 
   // PDF Export
-  exportPdf: (defaultFilename: string): Promise<{ success: boolean; filePath?: string; error?: string; canceled?: boolean }> =>
-    ipcRenderer.invoke('pdf:export', defaultFilename),
+  exportPdf: (defaultFilename: string, fullHeight: number): Promise<{ success: boolean; filePath?: string; error?: string; canceled?: boolean }> =>
+    ipcRenderer.invoke('pdf:export', defaultFilename, fullHeight),
 
   // Commission Reconciliation
   importXactlyCommissions: (filePath: string, period: string): Promise<{ inserted: number; updated: number }> =>
@@ -87,4 +89,10 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('commission:clearData', period),
   setInvestigationStatus: (opportunityNumber: string, period: string, status: string | null): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke('commission:setInvestigationStatus', opportunityNumber, period, status),
+
+  // Deal Backed Reason Tracking
+  getDealBackedReasons: (importedAt: string): Promise<Record<string, string | null>> =>
+    ipcRenderer.invoke('dealBacked:getReasons', importedAt),
+  setDealBackedReason: (crmOpportunityId: string, importedAt: string, reason: string | null): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke('dealBacked:setReason', crmOpportunityId, importedAt, reason),
 });

@@ -60,6 +60,7 @@ export interface AppSettings {
   tableau_site: string;
   tableau_view_id: string;
   tableau_filters: TableauFilters;
+  my_ai_ae_team: string[];
 }
 
 export interface CsvImportResult {

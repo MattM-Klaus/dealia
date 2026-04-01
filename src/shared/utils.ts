@@ -29,6 +29,27 @@ export function mapForecast(raw: string | null | undefined): AisForecast | null 
   return null;
 }
 
+// Maps stage name to base win rate for weighted pipe calculation
+export function getStageWinRate(stage: string | null | undefined): number {
+  if (!stage?.trim()) return 0;
+  const lower = stage.toLowerCase();
+
+  if (lower.includes('qualify need')) return 0.0;
+  if (lower.includes('confirm need')) return 0.10;
+  if (lower.includes('establish value')) return 0.15;
+  if (lower.includes('demonstrate value')) return 0.30;
+  if (lower.includes('secure commitment')) return 0.40;
+  if (lower.includes('contracting')) return 0.70;
+  if (lower.includes('signed') || lower.includes('closed')) return 1.0;
+
+  return 0; // Default to 0% for unknown stages
+}
+
+// Calculate weighted pipe value for an opportunity
+export function calculateWeightedPipe(arr: number, stage: string | null | undefined): number {
+  return arr * getStageWinRate(stage);
+}
+
 // Fiscal year starts Feb 1; FY number = calendar year + 1 (except Jan which stays in same FY)
 // e.g. Apr 16 2026 → 2027Q1, Nov 1 2026 → 2027Q4, Jan 15 2027 → 2027Q4, Feb 1 2027 → 2028Q1
 export function toCloseQuarter(dateStr: string | null | undefined): string {
@@ -103,7 +124,8 @@ export function getQuarterWeeks(quarter: string): Array<{ start: Date; end: Date
 
   while (current <= qEnd) {
     const weekEnd = new Date(current);
-    weekEnd.setDate(weekEnd.getDate() + 4); // Friday
+    weekEnd.setDate(weekEnd.getDate() + 6); // Sunday night (covers Mon-Sun)
+    weekEnd.setHours(23, 59, 59, 999); // End of Sunday
 
     // Only include weeks that overlap with the quarter
     if (weekEnd >= qStart) {
