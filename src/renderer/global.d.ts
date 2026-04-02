@@ -23,6 +23,7 @@ declare global {
       // Forecast
       getForecastOpps(): Promise<ForecastOpp[]>;
       getClosedWonOpps(): Promise<ClosedWonOpp[]>;
+      getPipelineSnapshots(): Promise<Array<{ date: string; data: ForecastOpp[] }>>;
       importForecastPipeline(filePath: string): Promise<ForecastImportResult>;
       importForecastClosedWon(filePath: string): Promise<ForecastImportResult>;
       getAnalyticsData(): Promise<AnalyticsData>;

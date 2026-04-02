@@ -25,6 +25,10 @@ function sumArr(list: ForecastOpp[], forecast: AisForecast): number {
     .reduce((s, o) => s + (o.ais_arr ?? o.product_arr_usd), 0);
 }
 
+function countUniqueOpps(list: ForecastOpp[]): number {
+  return new Set(list.map((o) => o.crm_opportunity_id)).size;
+}
+
 // ── Main Page ──────────────────────────────────────────────────
 
 export default function ForecastDashboard() {
@@ -89,12 +93,12 @@ export default function ForecastDashboard() {
   const filteredCw   = baseCw.filter((o) => aiAeFilter.size === 0 || aiAeFilter.has(o.ai_ae));
 
   // Summary totals
-  const totalCwBookings = filteredCw.reduce((s, o) => s + o.bookings, 0);
+  const totalCwBookings = filteredCw.reduce((s, o) => s + (o.edited_bookings ?? o.bookings), 0);
   const totalCommit     = sumArr(filteredOpps, 'Commit');
   const totalMostLikely = sumArr(filteredOpps, 'Most Likely');
   const totalBestCase   = sumArr(filteredOpps, 'Best Case');
   const totalRemaining  = sumArr(filteredOpps, 'Remaining Pipe');
-  const totalUnfilled   = filteredOpps.filter((o) => !o.ais_forecast).length;
+  const totalUnfilled   = countUniqueOpps(filteredOpps.filter((o) => !o.ais_forecast));
   const dealBacked      = totalCwBookings + totalCommit + totalMostLikely;
 
   // Breakdown keys
@@ -130,10 +134,10 @@ export default function ForecastDashboard() {
       <div className="grid grid-cols-7 gap-3 mb-8">
         <SummaryCard label="Deal Backed"     value={fmtCurrency(dealBacked)}      accent="blue"    sub="CW + Commit + Most Likely" />
         <SummaryCard label="Closed Won"      value={fmtCurrency(totalCwBookings)} accent="green"   sub={`${filteredCw.length} deals`} />
-        <SummaryCard label="AIS Commit"      value={fmtCurrency(totalCommit)}     accent="emerald" sub={`${filteredOpps.filter((o) => o.ais_forecast === 'Commit').length} opps`} />
-        <SummaryCard label="AIS Most Likely" value={fmtCurrency(totalMostLikely)} accent="yellow"  sub={`${filteredOpps.filter((o) => o.ais_forecast === 'Most Likely').length} opps`} />
-        <SummaryCard label="AIS Best Case"   value={fmtCurrency(totalBestCase)}   accent="blue"    sub={`${filteredOpps.filter((o) => o.ais_forecast === 'Best Case').length} opps`} />
-        <SummaryCard label="Remaining Pipe"  value={fmtCurrency(totalRemaining)}  accent="gray"    sub={`${filteredOpps.filter((o) => o.ais_forecast === 'Remaining Pipe').length} opps`} />
+        <SummaryCard label="AIS Commit"      value={fmtCurrency(totalCommit)}     accent="emerald" sub={`${countUniqueOpps(filteredOpps.filter((o) => o.ais_forecast === 'Commit'))} opps`} />
+        <SummaryCard label="AIS Most Likely" value={fmtCurrency(totalMostLikely)} accent="yellow"  sub={`${countUniqueOpps(filteredOpps.filter((o) => o.ais_forecast === 'Most Likely'))} opps`} />
+        <SummaryCard label="AIS Best Case"   value={fmtCurrency(totalBestCase)}   accent="blue"    sub={`${countUniqueOpps(filteredOpps.filter((o) => o.ais_forecast === 'Best Case'))} opps`} />
+        <SummaryCard label="Remaining Pipe"  value={fmtCurrency(totalRemaining)}  accent="gray"    sub={`${countUniqueOpps(filteredOpps.filter((o) => o.ais_forecast === 'Remaining Pipe'))} opps`} />
         <SummaryCard
           label="Unfilled AIS"
           value={totalUnfilled}
@@ -164,12 +168,12 @@ export default function ForecastDashboard() {
               {allAiAes.map((aiAe) => {
                 const myOpps     = filteredOpps.filter((o) => o.ai_ae === aiAe);
                 const myCw       = filteredCw.filter((o) => o.ai_ae === aiAe);
-                const cwTotal    = myCw.reduce((s, o) => s + o.bookings, 0);
+                const cwTotal    = myCw.reduce((s, o) => s + (o.edited_bookings ?? o.bookings), 0);
                 const commit     = sumArr(myOpps, 'Commit');
                 const mostLikely = sumArr(myOpps, 'Most Likely');
                 const bestCase   = sumArr(myOpps, 'Best Case');
                 const remaining  = sumArr(myOpps, 'Remaining Pipe');
-                const unfilled   = myOpps.filter((o) => !o.ais_forecast).length;
+                const unfilled   = countUniqueOpps(myOpps.filter((o) => !o.ais_forecast));
                 const dealBacked = cwTotal + commit + mostLikely;
                 return (
                   <tr key={aiAe} className="hover:bg-gray-50 transition-colors">
@@ -180,7 +184,7 @@ export default function ForecastDashboard() {
                     <td className="px-4 py-3 text-right font-semibold text-yellow-600">{mostLikely > 0 ? fmtCurrency(mostLikely) : <Dash />}</td>
                     <td className="px-4 py-3 text-right font-semibold text-blue-700">{bestCase > 0 ? fmtCurrency(bestCase) : <Dash />}</td>
                     <td className="px-4 py-3 text-right text-gray-500">{remaining > 0 ? fmtCurrency(remaining) : <Dash />}</td>
-                    <td className="px-4 py-3 text-right text-gray-500">{myOpps.length}</td>
+                    <td className="px-4 py-3 text-right text-gray-500">{countUniqueOpps(myOpps)}</td>
                     <td className="px-4 py-3 text-right">{unfilled > 0 ? <span className="font-semibold text-red-500">{unfilled}</span> : <Dash />}</td>
                   </tr>
                 );
@@ -193,7 +197,7 @@ export default function ForecastDashboard() {
                 <td className="px-4 py-3 text-right text-yellow-600">{fmtCurrency(totalMostLikely)}</td>
                 <td className="px-4 py-3 text-right text-blue-700">{fmtCurrency(totalBestCase)}</td>
                 <td className="px-4 py-3 text-right text-gray-500">{fmtCurrency(totalRemaining)}</td>
-                <td className="px-4 py-3 text-right text-gray-500">{filteredOpps.length}</td>
+                <td className="px-4 py-3 text-right text-gray-500">{countUniqueOpps(filteredOpps)}</td>
                 <td className="px-4 py-3 text-right">{totalUnfilled > 0 ? <span className="text-red-500">{totalUnfilled}</span> : <Dash />}</td>
               </TotalsRow>
             </tbody>
@@ -236,7 +240,7 @@ export default function ForecastDashboard() {
                       <td className="px-4 py-3 text-right font-semibold text-blue-700">{bestCase > 0 ? fmtCurrency(bestCase) : <Dash />}</td>
                       <td className="px-4 py-3 text-right text-gray-500">{remaining > 0 ? fmtCurrency(remaining) : <Dash />}</td>
                       <td className="px-4 py-3 text-right font-semibold text-gray-700">{fmtCurrency(total)}</td>
-                      <td className="px-4 py-3 text-right text-gray-500">{qOpps.length}</td>
+                      <td className="px-4 py-3 text-right text-gray-500">{countUniqueOpps(qOpps)}</td>
                     </tr>
                   );
                 })}
@@ -269,7 +273,7 @@ export default function ForecastDashboard() {
                 {allProducts.map((product) => {
                   const pOpps      = filteredOpps.filter((o) => o.product === product);
                   const pCw        = filteredCw.filter((o) => o.product === product);
-                  const cwTotal    = pCw.reduce((s, o) => s + o.bookings, 0);
+                  const cwTotal    = pCw.reduce((s, o) => s + (o.edited_bookings ?? o.bookings), 0);
                   const commit     = sumArr(pOpps, 'Commit');
                   const mostLikely = sumArr(pOpps, 'Most Likely');
                   const bestCase   = sumArr(pOpps, 'Best Case');
@@ -284,7 +288,7 @@ export default function ForecastDashboard() {
                       <td className="px-4 py-3 text-right font-semibold text-yellow-600">{mostLikely > 0 ? fmtCurrency(mostLikely) : <Dash />}</td>
                       <td className="px-4 py-3 text-right font-semibold text-blue-700">{bestCase > 0 ? fmtCurrency(bestCase) : <Dash />}</td>
                       <td className="px-4 py-3 text-right text-gray-500">{remaining > 0 ? fmtCurrency(remaining) : <Dash />}</td>
-                      <td className="px-4 py-3 text-right text-gray-500">{pOpps.length}</td>
+                      <td className="px-4 py-3 text-right text-gray-500">{countUniqueOpps(pOpps)}</td>
                     </tr>
                   );
                 })}

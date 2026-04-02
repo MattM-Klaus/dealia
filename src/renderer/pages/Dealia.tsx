@@ -10,6 +10,10 @@ function fmtK(v: number): string {
   return `$${v}`;
 }
 
+function countUniqueOpps(list: ForecastOpp[]): number {
+  return new Set(list.map((o) => o.crm_opportunity_id)).size;
+}
+
 function buildContext(opps: ForecastOpp[], closedWon: ClosedWonOpp[], quotas: Quota[]): string {
   const arrOf = (o: ForecastOpp) => o.ais_arr ?? o.product_arr_usd;
   const currentQuarter = toCloseQuarter(new Date().toISOString().split('T')[0]);
@@ -27,7 +31,7 @@ function buildContext(opps: ForecastOpp[], closedWon: ClosedWonOpp[], quotas: Qu
 
   // Current quarter CW
   const cwThisQuarter = closedWon.filter((o) => toCloseQuarter(o.close_date) === currentQuarter);
-  const totalCW = cwThisQuarter.reduce((s, o) => s + o.bookings, 0);
+  const totalCW = cwThisQuarter.reduce((s, o) => s + (o.edited_bookings ?? o.bookings), 0);
   const totalTarget = quotas.reduce((s, q) => s + (getQuarterlyTarget(q) ?? 0), 0);
 
   // Pipeline (all open opps)
@@ -60,7 +64,7 @@ function buildContext(opps: ForecastOpp[], closedWon: ClosedWonOpp[], quotas: Qu
   cwThisQuarter.forEach((o) => {
     if (!cwMap[o.crm_opportunity_id]) cwMap[o.crm_opportunity_id] = { account_name: o.account_name, ai_ae: o.ai_ae, products: [], bookings: 0 };
     cwMap[o.crm_opportunity_id].products.push(o.product);
-    cwMap[o.crm_opportunity_id].bookings += o.bookings;
+    cwMap[o.crm_opportunity_id].bookings += (o.edited_bookings ?? o.bookings);
   });
   const topCW = Object.values(cwMap).sort((a, b) => b.bookings - a.bookings).slice(0, 10);
 
@@ -73,7 +77,7 @@ Closed Won: ${fmtK(totalCW)}
 Attainment: ${totalTarget > 0 ? `${Math.round((totalCW / totalTarget) * 100)}%` : 'N/A'}
 
 === PIPELINE SUMMARY (all open opps) ===
-Total Pipeline: ${fmtK(totalPipeline)} (${opps.length} opps)
+Total Pipeline: ${fmtK(totalPipeline)} (${countUniqueOpps(opps)} opps)
 AIS Commit: ${fmtK(aisCommit)}
 AIS Most Likely: ${fmtK(aisMostLikely)}
 AIS Best Case: ${fmtK(aisBestCase)}
@@ -87,7 +91,7 @@ Deal Backed (CW + Commit + ML): ${fmtK(totalCW + aisCommit + aisMostLikely)}
     const aeCW     = cwThisQuarter.filter((o) => o.ai_ae === ae);
     const quotaObj = quotas.find((q) => q.ai_ae === ae);
     const target   = quotaObj ? getQuarterlyTarget(quotaObj) : null;
-    const cwTotal  = aeCW.reduce((s, o) => s + o.bookings, 0);
+    const cwTotal  = aeCW.reduce((s, o) => s + (o.edited_bookings ?? o.bookings), 0);
     const commit   = aeOpps.filter((o) => o.ais_forecast === 'Commit').reduce((s, o) => s + arrOf(o), 0);
     const ml       = aeOpps.filter((o) => o.ais_forecast === 'Most Likely').reduce((s, o) => s + arrOf(o), 0);
     const pipeline = aeOpps.reduce((s, o) => s + arrOf(o), 0);

@@ -7,9 +7,12 @@ import Analytics from './pages/Analytics';
 import Dealia from './pages/Dealia';
 import Pipeline from './pages/Pipeline';
 import ClosedWon from './pages/ClosedWon';
+import ClosedLost from './pages/ClosedLost';
 import ForecastDashboard from './pages/ForecastDashboard';
 import Settings from './pages/Settings';
 import History from './pages/History';
+import WeeklyTrends from './pages/WeeklyTrends';
+import CommissionReconciliation from './pages/CommissionReconciliation';
 import { FilterProvider } from './contexts/FilterContext';
 
 export default function App() {
@@ -24,8 +27,11 @@ export default function App() {
               <Route path="/accounts" element={<Accounts />} />
               <Route path="/pipeline" element={<Pipeline />} />
               <Route path="/closed-won" element={<ClosedWon />} />
+              <Route path="/closed-lost" element={<ClosedLost />} />
               <Route path="/forecast-dashboard" element={<ForecastDashboard />} />
               <Route path="/analytics" element={<Analytics />} />
+              <Route path="/weekly-trends" element={<WeeklyTrends />} />
+              <Route path="/commission-reconciliation" element={<CommissionReconciliation />} />
               <Route path="/dealia" element={<Dealia />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/history" element={<History />} />

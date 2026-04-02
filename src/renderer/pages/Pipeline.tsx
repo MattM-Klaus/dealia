@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { AisForecast, ClosedWonOpp, ForecastImportResult, ForecastOpp } from '../../shared/types';
 import { AIS_FORECAST_OPTIONS } from '../../shared/types';
-import { toCloseQuarter, mapForecast } from '../../shared/utils';
+import { toCloseQuarter, mapForecast, calculateWeightedPipe } from '../../shared/utils';
 import { useFilters } from '../contexts/FilterContext';
 
 const PRODUCT_COLORS: Record<string, string> = {
@@ -42,6 +42,10 @@ function fmtDelta(delta: number): string {
   return '$' + Math.abs(delta).toLocaleString('en-US', { maximumFractionDigits: 0 });
 }
 
+function countUniqueOpps(list: ForecastOpp[]): number {
+  return new Set(list.map((o) => o.crm_opportunity_id)).size;
+}
+
 function oppSfdcUrl(oppId: string): string {
   return `https://zendesk.lightning.force.com/lightning/r/Opportunity/${oppId}/view`;
 }
@@ -74,10 +78,10 @@ export default function Pipeline() {
   const [importMsg, setImportMsg]     = useState<string | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [importing, setImporting]     = useState(false);
-  const [prevTiles, setPrevTiles]     = useState<{ cw: number; commit: number; ml: number; bestCase: number; remaining: number; totalPipe: number } | null>(null);
+  const [prevTiles, setPrevTiles]     = useState<{ cw: number; commit: number; ml: number; bestCase: number; remaining: number; totalPipe: number; weightedPipe: number } | null>(null);
 
   // Ref always holds the latest tile values so handleImport can snapshot them
-  const tileRef = useRef({ cw: 0, commit: 0, ml: 0, bestCase: 0, remaining: 0, totalPipe: 0 });
+  const tileRef = useRef({ cw: 0, commit: 0, ml: 0, bestCase: 0, remaining: 0, totalPipe: 0, weightedPipe: 0 });
 
   // Filters from context
   const { filters, updatePipelineFilters } = useFilters();
@@ -93,6 +97,10 @@ export default function Pipeline() {
     aiAeFilter,
     topDealOnly,
   } = filters.pipeline;
+
+  // Local state for new features not in filter context
+  const [forecastType, setForecastType]   = useState<'ais' | 'vp'>('ais');
+  const [sortOppTotalDesc, setSortOppTotalDesc] = useState(false);
 
   const load = useCallback(async () => {
     const [o, cw] = await Promise.all([window.api.getForecastOpps(), window.api.getClosedWonOpps()]);
@@ -170,6 +178,40 @@ export default function Pipeline() {
     }
   }
 
+  async function handleSnowflakeSync() {
+    // Snapshot current tile values before the reload
+    setPrevTiles({ ...tileRef.current });
+
+    setImportMsg(null);
+    setImportError(null);
+    setImporting(true);
+
+    try {
+      const response: { success: boolean; result?: ForecastImportResult; error?: string } = await window.api.syncFromSnowflake();
+
+      if (!response.success || !response.result) {
+        setImportError(response.error || 'Snowflake sync failed');
+        setTimeout(() => setImportError(null), 15000);
+        return;
+      }
+
+      await load();
+
+      const result = response.result;
+      const parts = [`Synced from Snowflake: ${result.inserted} records`];
+      if (result.failed > 0) parts.push(`${result.failed} failed`);
+      if (result.errors.length > 0) parts.push(`First error: ${result.errors[0]}`);
+      setImportMsg(parts.join(' · '));
+      setTimeout(() => setImportMsg(null), 15000);
+    } catch (err) {
+      console.error('[Pipeline] Snowflake sync error:', err);
+      setImportError(`Snowflake sync failed: ${(err as Error).message ?? String(err)}`);
+      setTimeout(() => setImportError(null), 15000);
+    } finally {
+      setImporting(false);
+    }
+  }
+
   // Derived filter options
   const allManagers = [...new Set(opps.map((o) => o.manager_name).filter(Boolean))].sort();
   const allQuarters = [...new Set(opps.map((o) => toCloseQuarter(o.close_date)).filter(Boolean))].sort();
@@ -184,6 +226,20 @@ export default function Pipeline() {
     const prev = oppTotalArrMap.get(o.crm_opportunity_id) ?? 0;
     oppTotalArrMap.set(o.crm_opportunity_id, prev + o.product_arr_usd);
   }
+
+  // Filtered opps for Total Pipeline calculation (excludes forecast filters, uses raw product_arr_usd)
+  const totalPipelineOpps = opps.filter((o) => {
+    if (searchQuery && !o.account_name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+    if (managerFilter.size > 0 && !managerFilter.has(o.manager_name)) return false;
+    if (quarterFilter.size > 0 && !quarterFilter.has(toCloseQuarter(o.close_date))) return false;
+    if (productFilter.size > 0 && !productFilter.has(o.product)) return false;
+    if (regionFilter.size > 0 && !regionFilter.has(o.region)) return false;
+    if (aiAeFilter.size > 0 && !aiAeFilter.has(o.ai_ae)) return false;
+    if (minOppArr > 0 && (oppTotalArrMap.get(o.crm_opportunity_id) ?? 0) < minOppArr) return false;
+    if (topDealOnly && !o.ais_top_deal) return false;
+    // NOTE: Excludes vpFcstFilter and aisFcstFilter intentionally
+    return true;
+  });
 
   const filteredOpps = opps.filter((o) => {
     if (searchQuery && !o.account_name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
@@ -204,23 +260,41 @@ export default function Pipeline() {
     return true;
   });
 
-  // Tile ARR values (computed from filtered opps)
-  const commitArr    = filteredOpps.filter((o) => o.ais_forecast === 'Commit').reduce((s, o) => s + (o.ais_arr ?? o.product_arr_usd), 0);
-  const mlArr        = filteredOpps.filter((o) => o.ais_forecast === 'Most Likely').reduce((s, o) => s + (o.ais_arr ?? o.product_arr_usd), 0);
-  const bestCaseArr  = filteredOpps.filter((o) => o.ais_forecast === 'Best Case').reduce((s, o) => s + (o.ais_arr ?? o.product_arr_usd), 0);
-  const remainingArr = filteredOpps.filter((o) => o.ais_forecast === 'Remaining Pipe').reduce((s, o) => s + (o.ais_arr ?? o.product_arr_usd), 0);
-  const totalPipe    = filteredOpps.reduce((s, o) => s + (o.ais_arr ?? o.product_arr_usd), 0);
+  // Sort by Opp Total if enabled
+  const sortedOpps = sortOppTotalDesc
+    ? [...filteredOpps].sort((a, b) => {
+        const aTotal = oppTotalArrMap.get(a.crm_opportunity_id) ?? 0;
+        const bTotal = oppTotalArrMap.get(b.crm_opportunity_id) ?? 0;
+        return bTotal - aTotal; // Descending
+      })
+    : filteredOpps;
+
+  // Tile ARR values (computed from filtered opps, respecting forecast type toggle)
+  const commitArr    = forecastType === 'ais'
+    ? filteredOpps.filter((o) => o.ais_forecast === 'Commit').reduce((s, o) => s + (o.ais_arr ?? o.product_arr_usd), 0)
+    : filteredOpps.filter((o) => o.vp_deal_forecast === 'Commit').reduce((s, o) => s + (o.ais_arr ?? o.product_arr_usd), 0);
+  const mlArr        = forecastType === 'ais'
+    ? filteredOpps.filter((o) => o.ais_forecast === 'Most Likely').reduce((s, o) => s + (o.ais_arr ?? o.product_arr_usd), 0)
+    : filteredOpps.filter((o) => o.vp_deal_forecast === 'Most Likely').reduce((s, o) => s + (o.ais_arr ?? o.product_arr_usd), 0);
+  const bestCaseArr  = forecastType === 'ais'
+    ? filteredOpps.filter((o) => o.ais_forecast === 'Best Case').reduce((s, o) => s + (o.ais_arr ?? o.product_arr_usd), 0)
+    : filteredOpps.filter((o) => o.vp_deal_forecast === 'Best Case').reduce((s, o) => s + (o.ais_arr ?? o.product_arr_usd), 0);
+  const remainingArr = forecastType === 'ais'
+    ? filteredOpps.filter((o) => o.ais_forecast === 'Remaining Pipe').reduce((s, o) => s + (o.ais_arr ?? o.product_arr_usd), 0)
+    : filteredOpps.filter((o) => o.vp_deal_forecast === 'Remaining Pipe').reduce((s, o) => s + (o.ais_arr ?? o.product_arr_usd), 0);
+  const totalPipe    = totalPipelineOpps.reduce((s, o) => s + o.product_arr_usd, 0);
   const totalCW      = closedWon.filter((o) => {
     if (quarterFilter.size > 0 && !quarterFilter.has(toCloseQuarter(o.close_date))) return false;
     if (managerFilter.size > 0 && !managerFilter.has(o.manager_name)) return false;
     if (regionFilter.size > 0  && !regionFilter.has(o.region))        return false;
     if (aiAeFilter.size > 0    && !aiAeFilter.has(o.ai_ae))           return false;
     return true;
-  }).reduce((s, o) => s + o.bookings, 0);
+  }).reduce((s, o) => s + (o.edited_bookings ?? o.bookings), 0);
   const dealBacked   = totalCW + commitArr + mlArr;
+  const weightedPipe = totalCW + filteredOpps.reduce((s, o) => s + calculateWeightedPipe(o.ais_arr ?? o.product_arr_usd, o.stage_name), 0);
 
   // Keep ref in sync so handleImport can snapshot before reload
-  tileRef.current = { cw: totalCW, commit: commitArr, ml: mlArr, bestCase: bestCaseArr, remaining: remainingArr, totalPipe };
+  tileRef.current = { cw: totalCW, commit: commitArr, ml: mlArr, bestCase: bestCaseArr, remaining: remainingArr, totalPipe, weightedPipe };
 
   // Last upload timestamp from most recent updated_at across all opps
   const lastUpdated = opps.length > 0
@@ -241,11 +315,11 @@ export default function Pipeline() {
         </div>
         <div className="flex gap-2">
           <button
-            onClick={handleTableauSync}
+            onClick={handleSnowflakeSync}
             disabled={importing}
-            className="px-3 py-2 text-sm rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-3 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Sync from Tableau
+            Sync from Snowflake
           </button>
           <button
             onClick={handleImport}
@@ -277,12 +351,13 @@ export default function Pipeline() {
       )}
 
       {/* Stats */}
-      <div className="grid grid-cols-6 gap-3 mb-4">
+      <div className="grid grid-cols-7 gap-3 mb-4">
         <StatCard label="Deal Backed"        value={fmtCurrency(dealBacked)}   sub="CW + Commit + Most Likely" color="blue"  delta={prevTiles ? dealBacked - (prevTiles.cw + prevTiles.commit + prevTiles.ml) : undefined} />
-        <StatCard label="AIS Commit"         value={fmtCurrency(commitArr)}    color="green"              delta={prevTiles ? commitArr    - prevTiles.commit    : undefined} />
-        <StatCard label="AIS Most Likely"    value={fmtCurrency(mlArr)}        color="yellow"             delta={prevTiles ? mlArr        - prevTiles.ml        : undefined} />
-        <StatCard label="AIS Best Case"      value={fmtCurrency(bestCaseArr)}  color="orange"             delta={prevTiles ? bestCaseArr  - prevTiles.bestCase  : undefined} />
+        <StatCard label={forecastType === 'ais' ? 'AIS Commit' : 'VP Commit'}         value={fmtCurrency(commitArr)}    color="green"              delta={prevTiles ? commitArr    - prevTiles.commit    : undefined} />
+        <StatCard label={forecastType === 'ais' ? 'AIS Most Likely' : 'VP Most Likely'}    value={fmtCurrency(mlArr)}        color="yellow"             delta={prevTiles ? mlArr        - prevTiles.ml        : undefined} />
+        <StatCard label={forecastType === 'ais' ? 'AIS Best Case' : 'VP Best Case'}      value={fmtCurrency(bestCaseArr)}  color="orange"             delta={prevTiles ? bestCaseArr  - prevTiles.bestCase  : undefined} />
         <StatCard label="AIS Remaining Pipe" value={fmtCurrency(remainingArr)} color="gray"               delta={prevTiles ? remainingArr - prevTiles.remaining : undefined} />
+        <StatCard label="Weighted Pipe"      value={fmtCurrency(weightedPipe)} sub="CW + Stage Win Rates" color="purple"  delta={prevTiles ? weightedPipe - prevTiles.weightedPipe : undefined} />
         <StatCard label="Total Pipeline"     value={fmtCurrency(totalPipe)}    color="blue"               delta={prevTiles ? totalPipe    - prevTiles.totalPipe : undefined} />
       </div>
 
@@ -320,6 +395,18 @@ export default function Pipeline() {
           placeholder="All AIS Forecasts"
           noun="Forecasts"
         />
+        {/* Forecast type toggle */}
+        <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm bg-white">
+          {(['ais', 'vp'] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setForecastType(t)}
+              className={`px-3 py-1.5 font-medium transition-colors ${forecastType === t ? 'bg-green-700 text-white' : 'text-gray-500 hover:bg-gray-50'}`}
+            >
+              {t === 'ais' ? 'AIS Forecast' : 'VP Forecast'}
+            </button>
+          ))}
+        </div>
         <MultiSelect options={allAiAes} selected={aiAeFilter} onChange={(v) => updatePipelineFilters({ aiAeFilter: v })} placeholder="All AI AEs" noun="AI AEs" />
         <select
           value={minOppArr}
@@ -327,6 +414,7 @@ export default function Pipeline() {
           className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 outline-none focus:ring-2 focus:ring-green-400 bg-white"
         >
           <option value={0}>All Opp Sizes</option>
+          <option value={30000}>Opp ≥ $30k</option>
           <option value={50000}>Opp ≥ $50k</option>
           <option value={100000}>Opp ≥ $100k</option>
           <option value={250000}>Opp ≥ $250k</option>
@@ -347,7 +435,7 @@ export default function Pipeline() {
             Clear filters
           </button>
         )}
-        <span className="ml-auto text-xs text-gray-400">{filteredOpps.length} opp{filteredOpps.length !== 1 ? 's' : ''}</span>
+        <span className="ml-auto text-xs text-gray-400">{countUniqueOpps(filteredOpps)} opp{countUniqueOpps(filteredOpps) !== 1 ? 's' : ''}</span>
       </div>
 
       {/* Table */}
@@ -363,7 +451,16 @@ export default function Pipeline() {
                 <tr className="bg-gray-50 border-b border-gray-100">
                   <Th>Opp</Th>
                   <Th>Account</Th>
-                  <Th>Opp Total</Th>
+                  <Th>
+                    <button
+                      onClick={() => setSortOppTotalDesc(!sortOppTotalDesc)}
+                      className="hover:text-blue-600 flex items-center gap-1"
+                    >
+                      Opp Total
+                      {sortOppTotalDesc && <span>↓</span>}
+                    </button>
+                  </Th>
+                  <Th>Product</Th>
                   <Th>VP Forecast</Th>
                   <Th highlight>AIS Forecast</Th>
                   <Th highlight>AIS ARR</Th>
@@ -376,7 +473,6 @@ export default function Pipeline() {
                   <Th>AI AE</Th>
                   <Th>Region</Th>
                   <Th>Segment</Th>
-                  <Th>Product</Th>
                   <Th>Type</Th>
                   <Th>Stage</Th>
                   <Th>Close Qtr</Th>
@@ -386,7 +482,7 @@ export default function Pipeline() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {filteredOpps.map((opp) => (
+                {sortedOpps.map((opp) => (
                   <PipelineRow
                     key={opp.id}
                     opp={opp}
@@ -398,6 +494,10 @@ export default function Pipeline() {
                     onToggleTopDeal={(val) => {
                       setOpps((prev) => prev.map((o) => o.id === opp.id ? { ...o, ais_top_deal: val } : o));
                       window.api.setTopDeal(opp.id, val);
+                    }}
+                    onDelete={async () => {
+                      await window.api.deleteForecastOpp(opp.id);
+                      setOpps((prev) => prev.filter((o) => o.id !== opp.id));
                     }}
                   />
                 ))}
@@ -417,11 +517,13 @@ function PipelineRow({
   oppTotalArr,
   onUpdate,
   onToggleTopDeal,
+  onDelete,
 }: {
   opp: ForecastOpp;
   oppTotalArr: number;
   onUpdate: (field: 'ais_forecast' | 'ais_arr' | 'ais_close_date', val: AisForecast | number | string | null) => void;
   onToggleTopDeal: (val: number) => void;
+  onDelete: () => void;
 }) {
   const [editingArr, setEditingArr]   = useState(false);
   const [arrDraft, setArrDraft]       = useState('');
@@ -445,25 +547,45 @@ function PipelineRow({
   const aisCloseQtr = toCloseQuarter(opp.ais_close_date || opp.close_date);
   const hasNotes    = !!opp.product_specialist_notes?.trim();
 
-  const forecastEdited = opp.ais_forecast_manual === 1;
-  const arrEdited      = opp.ais_arr_manual === 1;
-  const dateEdited     = opp.ais_close_date_manual === 1;
+  // Highlight only when AIS values differ from VP values
+  const forecastEdited = opp.ais_forecast != null && opp.ais_forecast !== opp.vp_deal_forecast;
+  const arrEdited      = opp.ais_arr != null && opp.ais_arr !== opp.product_arr_usd;
+  const dateEdited     = opp.ais_close_date != null && opp.ais_close_date !== opp.close_date;
 
   return (
     <tr className="hover:bg-gray-50 transition-colors align-top">
       <Td>
-        <button
-          onClick={() => window.api.openExternal(oppSfdcUrl(opp.crm_opportunity_id))}
-          className="text-blue-500 hover:text-blue-700 hover:underline whitespace-nowrap"
-        >
-          SFDC ↗
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => window.api.openExternal(oppSfdcUrl(opp.crm_opportunity_id))}
+            className="text-blue-500 hover:text-blue-700 hover:underline whitespace-nowrap"
+          >
+            SFDC ↗
+          </button>
+          <button
+            onClick={() => {
+              if (confirm(`Delete opportunity "${opp.account_name}"? This cannot be undone.`)) {
+                onDelete();
+              }
+            }}
+            className="text-red-400 hover:text-red-600"
+            title="Delete opportunity"
+          >
+            🗑️
+          </button>
+        </div>
       </Td>
 
       <Td bold>{opp.account_name}</Td>
 
       <Td right>
         <span className="font-semibold text-gray-800">{fmtCurrency(oppTotalArr)}</span>
+      </Td>
+
+      <Td>
+        <span className={`px-1.5 py-0.5 rounded text-xs font-medium whitespace-nowrap ${productClass(opp.product)}`}>
+          {opp.product}
+        </span>
       </Td>
 
       <Td>
@@ -583,11 +705,6 @@ function PipelineRow({
       <Td>{opp.ai_ae}</Td>
       <Td>{opp.region}</Td>
       <Td>{opp.segment}</Td>
-      <Td>
-        <span className={`px-1.5 py-0.5 rounded text-xs font-medium whitespace-nowrap ${productClass(opp.product)}`}>
-          {opp.product}
-        </span>
-      </Td>
       <Td>{opp.type}</Td>
       <Td>{opp.stage_name}</Td>
       <Td>

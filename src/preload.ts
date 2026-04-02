@@ -26,21 +26,41 @@ contextBridge.exposeInMainWorld('api', {
   // Forecast
   getForecastOpps: () => ipcRenderer.invoke('forecast:getOpps'),
   getClosedWonOpps: () => ipcRenderer.invoke('forecast:getClosedWon'),
+  getClosedLostOpps: () => ipcRenderer.invoke('forecast:getClosedLost'),
+  getPipelineSnapshots: () => ipcRenderer.invoke('forecast:getPipelineSnapshots'),
   importForecastPipeline: (filePath: string) => ipcRenderer.invoke('forecast:importPipeline', filePath),
   importForecastClosedWon: (filePath: string) => ipcRenderer.invoke('forecast:importClosedWon', filePath),
+  importHistoricalCsv: (filePath: string, customDate: string) => ipcRenderer.invoke('forecast:importHistorical', filePath, customDate),
+  importHistoricalClosedWonCsv: (filePath: string, customDate: string) => ipcRenderer.invoke('forecast:importHistoricalClosedWon', filePath, customDate),
   syncFromTableau: () => ipcRenderer.invoke('tableau:sync'),
+  syncFromSnowflake: () => ipcRenderer.invoke('snowflake:sync'),
   getAnalyticsData: (): Promise<AnalyticsData> => ipcRenderer.invoke('analytics:getData'),
+  getHistoricalState: (asOfDate: string): Promise<ForecastOpp[] | null> => ipcRenderer.invoke('analytics:getHistoricalState', asOfDate),
+  getSnapshotsBetweenDates: (fromDate: string, toDate: string): Promise<{ start: ForecastOpp[] | null; end: ForecastOpp[] | null }> => ipcRenderer.invoke('analytics:getSnapshotsBetweenDates', fromDate, toDate),
+  getAllSnapshots: (): Promise<Array<{ imported_at: string; total_pipeline: number; opp_count: number; total_bookings?: number; deal_count?: number; has_pipeline: boolean; has_closed_won: boolean }>> => ipcRenderer.invoke('analytics:getAllSnapshots'),
+  deleteSnapshot: (importedAt: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('analytics:deleteSnapshot', importedAt),
+  snapshotCurrentState: (): Promise<{ pipelineCount: number; cwCount: number }> => ipcRenderer.invoke('analytics:snapshotCurrentState'),
   getQuotas: (): Promise<Quota[]> => ipcRenderer.invoke('quotas:getAll'),
   upsertQuota: (ai_ae: string, data: { region?: string; quota: number; q1_target?: number; q2_target?: number; q3_target?: number; q4_target?: number }): Promise<{ ok: boolean }> => ipcRenderer.invoke('quotas:upsert', ai_ae, data),
   deleteQuota: (ai_ae: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('quotas:delete', ai_ae),
 
   setTopDeal: (id: number, value: number): Promise<{ ok: boolean }> => ipcRenderer.invoke('forecast:setTopDeal', id, value),
+  deleteForecastOpp: (id: number): Promise<{ ok: boolean }> => ipcRenderer.invoke('forecast:deleteOpp', id),
 
   updateForecastAisField: (
     id: number,
     field: 'ais_forecast' | 'ais_arr' | 'ais_close_date',
     value: AisForecast | number | string | null,
   ) => ipcRenderer.invoke('forecast:updateAisField', id, field, value),
+
+  updateClosedWonBookings: (id: number, editedBookings: number | null): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke('forecast:updateClosedWonBookings', id, editedBookings),
+
+  toggleExcludeFromAnalysis: (oppId: string, exclude: boolean): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke('forecast:toggleExcludeFromAnalysis', oppId, exclude),
+
+  getExcludedDealIds: (): Promise<string[]> =>
+    ipcRenderer.invoke('forecast:getExcludedDealIds'),
 
   dealiaChat: (
     messages: { role: 'user' | 'assistant'; content: string }[],
@@ -51,4 +71,28 @@ contextBridge.exposeInMainWorld('api', {
   // Import History
   getImportHistory: () => ipcRenderer.invoke('importHistory:getAll'),
   openBackupCsv: (filename: string) => ipcRenderer.invoke('importHistory:openBackup', filename),
+
+  // PDF Export
+  exportPdf: (defaultFilename: string, fullHeight: number): Promise<{ success: boolean; filePath?: string; error?: string; canceled?: boolean }> =>
+    ipcRenderer.invoke('pdf:export', defaultFilename, fullHeight),
+
+  // Commission Reconciliation
+  importXactlyCommissions: (filePath: string, period: string): Promise<{ inserted: number; updated: number }> =>
+    ipcRenderer.invoke('commission:importXactly', filePath, period),
+  importTableauCommissions: (filePath: string, period: string): Promise<{ inserted: number; updated: number }> =>
+    ipcRenderer.invoke('commission:importTableau', filePath, period),
+  getCommissionReconciliation: (period: string) =>
+    ipcRenderer.invoke('commission:getReconciliation', period),
+  getCommissionPeriods: (): Promise<string[]> =>
+    ipcRenderer.invoke('commission:getPeriods'),
+  clearCommissionData: (period: string): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke('commission:clearData', period),
+  setInvestigationStatus: (opportunityNumber: string, period: string, status: string | null): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke('commission:setInvestigationStatus', opportunityNumber, period, status),
+
+  // Deal Backed Reason Tracking
+  getDealBackedReasons: (importedAt: string): Promise<Record<string, string | null>> =>
+    ipcRenderer.invoke('dealBacked:getReasons', importedAt),
+  setDealBackedReason: (crmOpportunityId: string, importedAt: string, reason: string | null): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke('dealBacked:setReason', crmOpportunityId, importedAt, reason),
 });
