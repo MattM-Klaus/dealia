@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { AisForecast, ClosedWonOpp, ForecastImportResult, ForecastOpp } from '../../shared/types';
 import { AIS_FORECAST_OPTIONS } from '../../shared/types';
 import { toCloseQuarter, mapForecast, calculateWeightedPipe } from '../../shared/utils';
+import { useFilters } from '../contexts/FilterContext';
 
 const PRODUCT_COLORS: Record<string, string> = {
   'ai agents': 'bg-purple-50 text-purple-700',
@@ -82,17 +83,22 @@ export default function Pipeline() {
   // Ref always holds the latest tile values so handleImport can snapshot them
   const tileRef = useRef({ cw: 0, commit: 0, ml: 0, bestCase: 0, remaining: 0, totalPipe: 0, weightedPipe: 0 });
 
-  // Filters
-  const [searchQuery, setSearchQuery]     = useState('');
-  const [managerFilter, setManagerFilter] = useState<Set<string>>(new Set());
-  const [quarterFilter, setQuarterFilter] = useState<Set<string>>(new Set([toCloseQuarter(new Date().toISOString().split('T')[0])]));
-  const [productFilter, setProductFilter] = useState<Set<string>>(new Set());
-  const [regionFilter, setRegionFilter]   = useState<Set<string>>(new Set());
-  const [vpFcstFilter, setVpFcstFilter]   = useState<Set<string>>(new Set());
-  const [aisFcstFilter, setAisFcstFilter] = useState<Set<string>>(new Set());
-  const [minOppArr, setMinOppArr]         = useState(0);
-  const [aiAeFilter, setAiAeFilter]       = useState<Set<string>>(new Set());
-  const [topDealOnly, setTopDealOnly]     = useState(false);
+  // Filters from context
+  const { filters, updatePipelineFilters } = useFilters();
+  const {
+    searchQuery,
+    managerFilter,
+    quarterFilter,
+    productFilter,
+    regionFilter,
+    vpFcstFilter,
+    aisFcstFilter,
+    minOppArr,
+    aiAeFilter,
+    topDealOnly,
+  } = filters.pipeline;
+
+  // Local state for new features not in filter context
   const [forecastType, setForecastType]   = useState<'ais' | 'vp'>('ais');
   const [sortOppTotalDesc, setSortOppTotalDesc] = useState(false);
 
@@ -361,13 +367,13 @@ export default function Pipeline() {
         <input
           type="text"
           value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
+          onChange={(e) => updatePipelineFilters({ searchQuery: e.target.value })}
           placeholder="Search by account name…"
           className="w-full text-sm border border-gray-200 rounded-xl pl-9 pr-4 py-2.5 outline-none focus:ring-2 focus:ring-green-400 bg-white placeholder-gray-300"
         />
         {searchQuery && (
           <button
-            onClick={() => setSearchQuery('')}
+            onClick={() => updatePipelineFilters({ searchQuery: '' })}
             className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm"
           >
             ✕
@@ -377,15 +383,15 @@ export default function Pipeline() {
 
       {/* Filters */}
       <div className="flex gap-2 mb-3 flex-wrap items-center">
-        <MultiSelect options={allManagers} selected={managerFilter} onChange={setManagerFilter} placeholder="All Managers" noun="Managers" />
-        <MultiSelect options={allQuarters} selected={quarterFilter} onChange={setQuarterFilter} placeholder="All Quarters" noun="Quarters" />
-        <MultiSelect options={allProducts} selected={productFilter} onChange={setProductFilter} placeholder="All Products" noun="Products" />
-        <MultiSelect options={allRegions}  selected={regionFilter}  onChange={setRegionFilter}  placeholder="All Regions"  noun="Regions"  />
-        <MultiSelect options={allVpFcsts}  selected={vpFcstFilter}  onChange={setVpFcstFilter}  placeholder="All VP Forecasts"  noun="VP Forecasts"  />
+        <MultiSelect options={allManagers} selected={managerFilter} onChange={(v) => updatePipelineFilters({ managerFilter: v })} placeholder="All Managers" noun="Managers" />
+        <MultiSelect options={allQuarters} selected={quarterFilter} onChange={(v) => updatePipelineFilters({ quarterFilter: v })} placeholder="All Quarters" noun="Quarters" />
+        <MultiSelect options={allProducts} selected={productFilter} onChange={(v) => updatePipelineFilters({ productFilter: v })} placeholder="All Products" noun="Products" />
+        <MultiSelect options={allRegions}  selected={regionFilter}  onChange={(v) => updatePipelineFilters({ regionFilter: v })}  placeholder="All Regions"  noun="Regions"  />
+        <MultiSelect options={allVpFcsts}  selected={vpFcstFilter}  onChange={(v) => updatePipelineFilters({ vpFcstFilter: v })}  placeholder="All VP Forecasts"  noun="VP Forecasts"  />
         <MultiSelect
           options={['Needs to be set', ...AIS_FORECAST_OPTIONS]}
           selected={aisFcstFilter}
-          onChange={setAisFcstFilter}
+          onChange={(v) => updatePipelineFilters({ aisFcstFilter: v })}
           placeholder="All AIS Forecasts"
           noun="Forecasts"
         />
@@ -401,10 +407,10 @@ export default function Pipeline() {
             </button>
           ))}
         </div>
-        <MultiSelect options={allAiAes} selected={aiAeFilter} onChange={setAiAeFilter} placeholder="All AI AEs" noun="AI AEs" />
+        <MultiSelect options={allAiAes} selected={aiAeFilter} onChange={(v) => updatePipelineFilters({ aiAeFilter: v })} placeholder="All AI AEs" noun="AI AEs" />
         <select
           value={minOppArr}
-          onChange={(e) => setMinOppArr(Number(e.target.value))}
+          onChange={(e) => updatePipelineFilters({ minOppArr: Number(e.target.value) })}
           className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 outline-none focus:ring-2 focus:ring-green-400 bg-white"
         >
           <option value={0}>All Opp Sizes</option>
@@ -416,14 +422,14 @@ export default function Pipeline() {
           <option value={1000000}>Opp ≥ $1M</option>
         </select>
         <button
-          onClick={() => setTopDealOnly((v) => !v)}
+          onClick={() => updatePipelineFilters({ topDealOnly: !topDealOnly })}
           className={`text-sm border rounded-lg px-3 py-1.5 outline-none ${topDealOnly ? 'border-green-400 text-green-700 font-medium bg-white' : 'border-gray-200 text-gray-600 hover:border-gray-300 bg-white'}`}
         >
           ⭐ Top Deals
         </button>
         {(managerFilter.size > 0 || quarterFilter.size > 0 || productFilter.size > 0 || regionFilter.size > 0 || vpFcstFilter.size > 0 || aisFcstFilter.size > 0 || aiAeFilter.size > 0 || minOppArr > 0 || topDealOnly) && (
           <button
-            onClick={() => { setSearchQuery(''); setManagerFilter(new Set()); setQuarterFilter(new Set()); setProductFilter(new Set()); setRegionFilter(new Set()); setVpFcstFilter(new Set()); setAisFcstFilter(new Set()); setAiAeFilter(new Set()); setMinOppArr(0); setTopDealOnly(false); }}
+            onClick={() => updatePipelineFilters({ searchQuery: '', managerFilter: new Set(), quarterFilter: new Set(), productFilter: new Set(), regionFilter: new Set(), vpFcstFilter: new Set(), aisFcstFilter: new Set(), aiAeFilter: new Set(), minOppArr: 0, topDealOnly: false })}
             className="text-xs text-gray-400 hover:text-gray-600 px-2"
           >
             Clear filters
