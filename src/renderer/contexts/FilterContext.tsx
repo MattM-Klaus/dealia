@@ -18,6 +18,7 @@ export interface ClosedWonFilters {
   searchQuery: string;
   managerFilter: string;
   quarterFilter: string;
+  monthFilter: string;
   aiAeFilter: string;
 }
 
@@ -96,6 +97,7 @@ const getDefaultFilters = (): AllFilters => ({
     searchQuery: '',
     managerFilter: '',
     quarterFilter: '',
+    monthFilter: '',
     aiAeFilter: '',
   },
   forecastDashboard: {
