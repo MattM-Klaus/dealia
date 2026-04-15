@@ -69,6 +69,10 @@ export default function Settings() {
   const [editingQuota, setEditingQuota] = useState<string | null>(null);
   const [editDraft, setEditDraft]       = useState(emptyDraft());
 
+  // Data Reset Tools
+  const [resettingAisArr, setResettingAisArr] = useState(false);
+  const [resetResult, setResetResult] = useState<{ updated: number } | null>(null);
+
   useEffect(() => {
     window.api.getSettings().then(setSettings);
     window.api.getQuotas().then(setQuotas);
@@ -170,6 +174,28 @@ export default function Settings() {
     }
 
     setTestingTableau(false);
+  }
+
+  async function handleResetAisArr() {
+    const confirmed = confirm(
+      '⚠️ Reset All AIS ARR to Tableau ARR?\n\n' +
+      'This will:\n' +
+      '• Set all AIS ARR values to match the Tableau Pipeline ARR column\n' +
+      '• Clear all manual AIS ARR edits (yellow highlights will disappear)\n' +
+      '• Cannot be undone\n\n' +
+      'Your AIS Forecast and AIS Close Date edits will NOT be affected.\n\n' +
+      'Continue?'
+    );
+
+    if (!confirmed) return;
+
+    setResettingAisArr(true);
+    setResetResult(null);
+
+    const result = await window.api.resetAisArrToTableau();
+    setResetResult(result);
+
+    setResettingAisArr(false);
   }
 
   return (
@@ -335,6 +361,35 @@ export default function Settings() {
           </div>
           {settings.my_ai_ae_team.length > 0 && (
             <p className="text-xs text-green-600 mt-1">✓ Filtering for {settings.my_ai_ae_team.length} AI AE{settings.my_ai_ae_team.length !== 1 ? 's' : ''}</p>
+          )}
+        </div>
+      </div>
+
+      {/* Data Reset Tools */}
+      <div className="bg-white rounded-xl border border-gray-100 px-6 py-5 mb-4">
+        <h3 className="text-sm font-semibold text-gray-700 mb-1">Data Reset Tools</h3>
+        <p className="text-xs text-gray-400 mb-4">
+          Bulk operations to fix data issues. Use with caution — these actions cannot be undone.
+        </p>
+
+        <div className="border border-orange-200 bg-orange-50/30 rounded-lg p-4">
+          <h4 className="text-sm font-semibold text-gray-700 mb-1">Reset All AIS ARR to Tableau ARR</h4>
+          <p className="text-xs text-gray-500 mb-3">
+            If your AIS ARR values are incorrect (e.g., after a bad Snowflake sync), this will reset all AIS ARR values
+            to match the Tableau Pipeline ARR column. This clears all manual AIS ARR edits and removes yellow highlighting.
+            Your AIS Forecast and AIS Close Date edits will NOT be affected.
+          </p>
+          <button
+            onClick={handleResetAisArr}
+            disabled={resettingAisArr}
+            className="px-4 py-2 text-sm rounded-lg bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-40 transition-colors"
+          >
+            {resettingAisArr ? 'Resetting...' : 'Reset All AIS ARR'}
+          </button>
+          {resetResult && (
+            <p className="text-xs text-green-600 mt-2">
+              ✓ Reset complete! Updated {resetResult.updated} deal{resetResult.updated !== 1 ? 's' : ''}.
+            </p>
           )}
         </div>
       </div>

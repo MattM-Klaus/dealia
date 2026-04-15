@@ -341,6 +341,18 @@ function runMigrations(): void {
     );
   `);
 
+  // Weekly Notes table for Deal Backed commentary
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS weekly_notes (
+      week_start TEXT NOT NULL,
+      region TEXT NOT NULL,
+      notes TEXT DEFAULT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (week_start, region)
+    );
+  `);
+
   // Safe migrations for existing databases that may not have new columns yet
   for (const col of [
     `ALTER TABLE accounts ADD COLUMN target_products TEXT NOT NULL DEFAULT '[]'`,
@@ -986,6 +998,20 @@ export function getExcludedDealIds(): Set<string> {
     SELECT crm_opportunity_id FROM excluded_deals
   `).all() as Array<{ crm_opportunity_id: string }>;
   return new Set(rows.map(r => r.crm_opportunity_id));
+}
+
+export function resetAllAisArrToTableau(): { updated: number } {
+  console.log('[database] Resetting all AIS ARR values to Tableau ARR...');
+
+  const result = db.prepare(`
+    UPDATE forecast_opps
+    SET ais_arr = product_arr_usd,
+        ais_arr_manual = 0,
+        updated_at = datetime('now')
+  `).run();
+
+  console.log(`[database] Reset ${result.changes} AIS ARR values to match Tableau ARR`);
+  return { updated: result.changes };
 }
 
 // Returns a snapshot of all existing pipeline opps for diff comparison before re-import
@@ -1871,5 +1897,30 @@ export function setDealBackedReason(crmOpportunityId: string, importedAt: string
         reason = excluded.reason,
         updated_at = datetime('now')
     `).run(crmOpportunityId, importedAt, reason);
+  }
+}
+
+export function getWeeklyNotes(weekStart: string, region: string): string | null {
+  const result = db.prepare(`
+    SELECT notes
+    FROM weekly_notes
+    WHERE week_start = ? AND region = ?
+  `).get(weekStart, region) as { notes: string | null } | undefined;
+
+  return result?.notes ?? null;
+}
+
+export function setWeeklyNotes(weekStart: string, region: string, notes: string | null): void {
+  if (notes === null || notes.trim() === '') {
+    db.prepare('DELETE FROM weekly_notes WHERE week_start = ? AND region = ?')
+      .run(weekStart, region);
+  } else {
+    db.prepare(`
+      INSERT INTO weekly_notes (week_start, region, notes)
+      VALUES (?, ?, ?)
+      ON CONFLICT(week_start, region) DO UPDATE SET
+        notes = excluded.notes,
+        updated_at = datetime('now')
+    `).run(weekStart, region, notes);
   }
 }

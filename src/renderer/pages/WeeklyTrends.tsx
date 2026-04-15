@@ -159,6 +159,10 @@ export default function WeeklyTrends() {
   const [dealBackedReasons, setDealBackedReasons] = useState<Map<string, string | null>>(new Map());
   const [loading, setLoading] = useState(true);
 
+  // Weekly notes state (region-specific)
+  const [weeklyNotesNA, setWeeklyNotesNA] = useState<string>('');
+  const [weeklyNotesLATAM, setWeeklyNotesLATAM] = useState<string>('');
+
   // Track the last snapshot we loaded reasons for to avoid infinite loops
   const lastLoadedSnapshotRef = React.useRef<string | null>(null);
 
@@ -351,6 +355,29 @@ export default function WeeklyTrends() {
 
     loadReasons();
   }, [snapshots, selectedWeekIndex, weeks]);
+
+  // Load weekly notes when week changes
+  useEffect(() => {
+    const loadNotes = async () => {
+      if (weeks.length === 0 || selectedWeekIndex < 0) return;
+
+      const currentWeek = weeks[selectedWeekIndex];
+      if (!currentWeek || !currentWeek.start) return;
+
+      const weekStartStr = currentWeek.start.toISOString().split('T')[0];
+
+      try {
+        const notesNA = await window.api.getWeeklyNotes(weekStartStr, 'NA');
+        const notesLATAM = await window.api.getWeeklyNotes(weekStartStr, 'LATAM');
+        setWeeklyNotesNA(notesNA || '');
+        setWeeklyNotesLATAM(notesLATAM || '');
+      } catch (err) {
+        console.error('Error loading weekly notes:', err);
+      }
+    };
+
+    loadNotes();
+  }, [selectedWeekIndex, weeks]);
 
   // Close manager dropdown when clicking outside
   useEffect(() => {
@@ -923,6 +950,10 @@ export default function WeeklyTrends() {
             setDealBackedReasons={setDealBackedReasons}
             weeks={weeks}
             selectedWeekIndex={selectedWeekIndex}
+            weeklyNotesNA={weeklyNotesNA}
+            weeklyNotesLATAM={weeklyNotesLATAM}
+            setWeeklyNotesNA={setWeeklyNotesNA}
+            setWeeklyNotesLATAM={setWeeklyNotesLATAM}
           />
         );
       })()}
@@ -1344,6 +1375,10 @@ function MovementBreakdown({
   setDealBackedReasons,
   weeks,
   selectedWeekIndex,
+  weeklyNotesNA,
+  weeklyNotesLATAM,
+  setWeeklyNotesNA,
+  setWeeklyNotesLATAM,
 }: {
   currentWeek: WeekData;
   previousWeek: WeekData;
@@ -1365,6 +1400,10 @@ function MovementBreakdown({
   setDealBackedReasons: (reasons: Map<string, string | null>) => void;
   weeks: Array<{ label: string; weekStart: Date; weekEnd: Date; start: Date; end: Date }>;
   selectedWeekIndex: number;
+  weeklyNotesNA: string;
+  weeklyNotesLATAM: string;
+  setWeeklyNotesNA: (notes: string) => void;
+  setWeeklyNotesLATAM: (notes: string) => void;
 }) {
   const [expandedSection, setExpandedSection] = React.useState<string | null>(null);
 
@@ -1551,9 +1590,15 @@ function MovementBreakdown({
     .badge-bc { background: #dbeafe; color: #1e40af; }
     .badge-removed { background: #fee2e2; color: #991b1b; }
     .summary { background: #f0f9ff; border: 2px solid #bae6fd; border-radius: 8px; padding: 20px; margin-bottom: 24px; }
-    .summary-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 15px; }
+    .summary-row { display: flex; justify-between; margin-bottom: 8px; font-size: 15px; }
     .summary-label { color: #0c4a6e; font-weight: 500; }
     .summary-value { color: #0c4a6e; font-weight: 700; }
+    .notes-section { background: #eff6ff; border: 2px solid #bfdbfe; border-radius: 8px; padding: 20px; margin-bottom: 24px; }
+    .notes-section-latam { background: #faf5ff; border: 2px solid #e9d5ff; }
+    .notes-title { font-size: 16px; font-weight: 600; color: #1e3a8a; margin-bottom: 12px; }
+    .notes-title-latam { color: #6b21a8; }
+    .notes-content { color: #1e40af; font-size: 14px; line-height: 1.6; white-space: pre-wrap; }
+    .notes-content-latam { color: #7e22ce; }
     @media print { body { background: white; padding: 0; } .container { box-shadow: none; } }
   </style>
 </head>
@@ -1567,6 +1612,34 @@ function MovementBreakdown({
       <div class="summary-row"><span class="summary-label">Current Week (As of EOD ${currWeekEOD}):</span><span class="summary-value">${fmtDollar(currDealBacked)}</span></div>
       <div class="summary-row"><span class="summary-label">Week-over-Week Change:</span><span class="summary-value" style="color: ${currDealBacked - prevDealBacked >= 0 ? '#059669' : '#dc2626'}">${currDealBacked - prevDealBacked >= 0 ? '+' : ''}${fmtDollar(currDealBacked - prevDealBacked)}</span></div>
     </div>
+
+    ${selectedRegion === 'All' ? `
+      ${weeklyNotesNA ? `
+        <div class="notes-section">
+          <div class="notes-title">AIS Manager Notes - NA Region</div>
+          <div class="notes-content">${weeklyNotesNA}</div>
+        </div>
+      ` : ''}
+      ${weeklyNotesLATAM ? `
+        <div class="notes-section notes-section-latam">
+          <div class="notes-title notes-title-latam">AIS Manager Notes - LATAM Region</div>
+          <div class="notes-content notes-content-latam">${weeklyNotesLATAM}</div>
+        </div>
+      ` : ''}
+    ` : `
+      ${(selectedRegion === 'NA' && weeklyNotesNA) ? `
+        <div class="notes-section">
+          <div class="notes-title">AIS Manager Notes - NA Region</div>
+          <div class="notes-content">${weeklyNotesNA}</div>
+        </div>
+      ` : ''}
+      ${(selectedRegion === 'LATAM' && weeklyNotesLATAM) ? `
+        <div class="notes-section notes-section-latam">
+          <div class="notes-title notes-title-latam">AIS Manager Notes - LATAM Region</div>
+          <div class="notes-content notes-content-latam">${weeklyNotesLATAM}</div>
+        </div>
+      ` : ''}
+    `}
 
     ${closedWonCount > 0 ? `
     <div class="section">
@@ -1654,7 +1727,10 @@ function MovementBreakdown({
         ${enteredDealBacked.map(item => `
           <div class="deal-card">
             <div class="deal-header">
-              <div class="deal-name">${item.opp.account_name}</div>
+              <div class="deal-name">
+                ${item.opp.account_name}
+                ${item.opp.crm_opportunity_id ? `<a href="https://zendesk.lightning.force.com/lightning/r/Opportunity/${item.opp.crm_opportunity_id}/view" target="_blank" style="color: #2563eb; margin-left: 4px; text-decoration: none;">🔗</a>` : ''}
+              </div>
               <div class="deal-amount">+${fmtDollar(item.arr)}</div>
             </div>
             <div class="deal-details">
@@ -2166,6 +2242,74 @@ function MovementBreakdown({
         {(expandedSection === 'calculations' || preparingPrint) && (
           <div className="px-6 pb-6 border-t border-gray-100" data-collapsible-content>
             <div className="py-4">
+              {/* AIS Manager Notes Section */}
+              {selectedRegion === 'All' ? (
+                <>
+                  {/* NA Notes */}
+                  <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <h5 className="text-sm font-semibold text-blue-900 mb-2">AIS Manager Notes - NA Region</h5>
+                    <textarea
+                      value={weeklyNotesNA}
+                      onChange={(e) => setWeeklyNotesNA(e.target.value)}
+                      onBlur={async () => {
+                        const weekStartStr = weeks[selectedWeekIndex]?.start.toISOString().split('T')[0];
+                        if (weekStartStr) {
+                          await window.api.setWeeklyNotes(weekStartStr, 'NA', weeklyNotesNA || null);
+                        }
+                      }}
+                      placeholder="Add notes about NA deal backed changes..."
+                      className="w-full text-sm border border-blue-300 rounded px-3 py-2 outline-none focus:ring-2 focus:ring-blue-400 resize-vertical min-h-[80px] bg-white"
+                    />
+                  </div>
+
+                  {/* LATAM Notes */}
+                  <div className="mb-6 bg-purple-50 border border-purple-200 rounded-lg p-4">
+                    <h5 className="text-sm font-semibold text-purple-900 mb-2">AIS Manager Notes - LATAM Region</h5>
+                    <textarea
+                      value={weeklyNotesLATAM}
+                      onChange={(e) => setWeeklyNotesLATAM(e.target.value)}
+                      onBlur={async () => {
+                        const weekStartStr = weeks[selectedWeekIndex]?.start.toISOString().split('T')[0];
+                        if (weekStartStr) {
+                          await window.api.setWeeklyNotes(weekStartStr, 'LATAM', weeklyNotesLATAM || null);
+                        }
+                      }}
+                      placeholder="Add notes about LATAM deal backed changes..."
+                      className="w-full text-sm border border-purple-300 rounded px-3 py-2 outline-none focus:ring-2 focus:ring-purple-400 resize-vertical min-h-[80px] bg-white"
+                    />
+                  </div>
+                </>
+              ) : (
+                <div className={`mb-6 ${selectedRegion === 'NA' ? 'bg-blue-50 border-blue-200' : 'bg-purple-50 border-purple-200'} border rounded-lg p-4`}>
+                  <h5 className={`text-sm font-semibold mb-2 ${selectedRegion === 'NA' ? 'text-blue-900' : 'text-purple-900'}`}>
+                    AIS Manager Notes - {selectedRegion} Region
+                  </h5>
+                  <textarea
+                    value={selectedRegion === 'NA' ? weeklyNotesNA : weeklyNotesLATAM}
+                    onChange={(e) => {
+                      if (selectedRegion === 'NA') {
+                        setWeeklyNotesNA(e.target.value);
+                      } else {
+                        setWeeklyNotesLATAM(e.target.value);
+                      }
+                    }}
+                    onBlur={async () => {
+                      const weekStartStr = weeks[selectedWeekIndex]?.start.toISOString().split('T')[0];
+                      if (weekStartStr) {
+                        const notes = selectedRegion === 'NA' ? weeklyNotesNA : weeklyNotesLATAM;
+                        await window.api.setWeeklyNotes(weekStartStr, selectedRegion, notes || null);
+                      }
+                    }}
+                    placeholder={`Add notes about ${selectedRegion} deal backed changes...`}
+                    className={`w-full text-sm border rounded px-3 py-2 outline-none resize-vertical min-h-[80px] bg-white ${
+                      selectedRegion === 'NA'
+                        ? 'border-blue-300 focus:ring-2 focus:ring-blue-400'
+                        : 'border-purple-300 focus:ring-2 focus:ring-purple-400'
+                    }`}
+                  />
+                </div>
+              )}
+
               {/* Previous Week Breakdown */}
               <div className="mb-6">
                 <h5 className="text-sm font-semibold text-gray-700 mb-2">Previous Week (As of EOD {prevWeekEOD})</h5>
@@ -2575,6 +2719,7 @@ function MovementBreakdown({
                                           <option value="Moved from C/ML to BC">Moved from C/ML to BC</option>
                                           <option value="Pushed to next quarter">Pushed to next quarter</option>
                                           <option value="Opp Lost">Opp Lost</option>
+                                          <option value="Closed Won - Non-Commish">Closed Won - Non-Commish</option>
                                           <option value="AI Products Removed">AI Products Removed</option>
                                           <option value="Other">Other</option>
                                         </select>
@@ -2622,7 +2767,20 @@ function MovementBreakdown({
                             <div key={i} className="text-xs bg-white p-2 rounded border border-gray-200">
                               <div className="flex justify-between items-start">
                                 <div className="flex-1">
-                                  <div className="font-medium text-gray-900">{item.opp.account_name}</div>
+                                  <div className="flex items-center gap-1">
+                                    <span className="font-medium text-gray-900">{item.opp.account_name}</span>
+                                    {item.opp.crm_opportunity_id && (
+                                      <button
+                                        onClick={() => window.api.openExternal(`https://zendesk.lightning.force.com/lightning/r/Opportunity/${item.opp.crm_opportunity_id}/view`)}
+                                        className="text-blue-600 hover:text-blue-800 shrink-0"
+                                        title="Open in Salesforce"
+                                      >
+                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                        </svg>
+                                      </button>
+                                    )}
+                                  </div>
                                   <div className="text-gray-400 text-xs mt-0.5">
                                     {item.from} → {item.to}
                                   </div>
