@@ -38,6 +38,9 @@ import {
   setInvestigationStatus,
   getDealBackedReasons,
   setDealBackedReason,
+  resetAllAisArrToTableau,
+  getWeeklyNotes,
+  setWeeklyNotes,
 } from './database';
 import type { AisForecast, ContactStatus } from '../shared/types';
 import { sendTestNotification } from './slack';
@@ -456,5 +459,21 @@ ${context}`;
   ipcMain.handle('dealBacked:setReason', (_event, crmOpportunityId: string, importedAt: string, reason: string | null) => {
     setDealBackedReason(crmOpportunityId, importedAt, reason);
     return { ok: true };
+  });
+
+  // Weekly Notes
+  ipcMain.handle('weeklyNotes:get', (_event, weekStart: string, region: string) => {
+    const notes = getWeeklyNotes(weekStart, region);
+    return notes;
+  });
+  ipcMain.handle('weeklyNotes:set', (_event, weekStart: string, region: string, notes: string | null) => {
+    setWeeklyNotes(weekStart, region, notes);
+    return { ok: true };
+  });
+
+  // Reset AIS ARR to Tableau ARR
+  ipcMain.handle('forecast:resetAisArrToTableau', () => {
+    const result = resetAllAisArrToTableau();
+    return { ok: true, updated: result.updated };
   });
 }
