@@ -13,6 +13,16 @@ export function initDatabase(): void {
   runMigrations();
 }
 
+/**
+ * Sets the database instance (primarily for testing).
+ * Allows tests to inject an in-memory test database.
+ *
+ * @param database - The database instance to use
+ */
+export function setDatabase(database: Database.Database): void {
+  db = database;
+}
+
 function runMigrations(): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS accounts (
@@ -198,10 +208,16 @@ function runMigrations(): void {
   `);
   // Safe migrations for quarterly targets and region
   for (const col of ['q1_target', 'q2_target', 'q3_target', 'q4_target']) {
-    try { db.exec(`ALTER TABLE quotas ADD COLUMN ${col} REAL NOT NULL DEFAULT 0`); } catch {}
+    try { db.exec(`ALTER TABLE quotas ADD COLUMN ${col} REAL NOT NULL DEFAULT 0`); } catch (error) {
+      // Column already exists, safe to ignore
+    }
   }
-  try { db.exec(`ALTER TABLE quotas ADD COLUMN region TEXT NOT NULL DEFAULT ''`); } catch {}
-  try { db.exec(`ALTER TABLE forecast_opps ADD COLUMN ais_top_deal INTEGER DEFAULT 0`); } catch {}
+  try { db.exec(`ALTER TABLE quotas ADD COLUMN region TEXT NOT NULL DEFAULT ''`); } catch (error) {
+    // Column already exists, safe to ignore
+  }
+  try { db.exec(`ALTER TABLE forecast_opps ADD COLUMN ais_top_deal INTEGER DEFAULT 0`); } catch (error) {
+    // Column already exists, safe to ignore
+  }
 
   // forecast_changes: persists diffs detected on each pipeline CSV upload
   db.exec(`
@@ -1529,6 +1545,11 @@ export function importXactlyCommissions(data: {
   credit_amount: number;
   period: string;
 }[]): { inserted: number; updated: number } {
+  const checkStmt = db.prepare(`
+    SELECT 1 FROM xactly_commissions
+    WHERE opportunity_number = ? AND credit_type = ? AND period = ?
+  `);
+
   const stmt = db.prepare(`
     INSERT INTO xactly_commissions (opportunity_number, customer_name, commissionable_date, credit_type, credit_amount, period)
     VALUES (?, ?, ?, ?, ?, ?)
@@ -1544,7 +1565,14 @@ export function importXactlyCommissions(data: {
 
   const transaction = db.transaction(() => {
     for (const row of data) {
-      const result = stmt.run(
+      // Check if row exists before insert
+      const exists = checkStmt.get(
+        row.opportunity_number,
+        row.credit_type,
+        row.period
+      );
+
+      stmt.run(
         row.opportunity_number,
         row.customer_name,
         row.commissionable_date,
@@ -1552,10 +1580,11 @@ export function importXactlyCommissions(data: {
         row.credit_amount,
         row.period
       );
-      if (result.changes > 0) {
-        inserted++;
-      } else {
+
+      if (exists) {
         updated++;
+      } else {
+        inserted++;
       }
     }
   });
@@ -1575,6 +1604,11 @@ export function importTableauClosedWon(data: {
   close_date: string;
   period: string;
 }[]): { inserted: number; updated: number } {
+  const checkStmt = db.prepare(`
+    SELECT 1 FROM tableau_closed_won
+    WHERE opportunity_number = ? AND product = ? AND period = ?
+  `);
+
   const stmt = db.prepare(`
     INSERT INTO tableau_closed_won (opportunity_number, crm_opportunity_id, account_name, ae_name, manager_name, product, bookings, close_date, period)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1593,7 +1627,14 @@ export function importTableauClosedWon(data: {
 
   const transaction = db.transaction(() => {
     for (const row of data) {
-      const result = stmt.run(
+      // Check if row exists before insert
+      const exists = checkStmt.get(
+        row.opportunity_number,
+        row.product,
+        row.period
+      );
+
+      stmt.run(
         row.opportunity_number,
         row.crm_opportunity_id,
         row.account_name,
@@ -1604,10 +1645,11 @@ export function importTableauClosedWon(data: {
         row.close_date,
         row.period
       );
-      if (result.changes > 0) {
-        inserted++;
-      } else {
+
+      if (exists) {
         updated++;
+      } else {
+        inserted++;
       }
     }
   });

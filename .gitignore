@@ -91,3 +91,12 @@ typings/
 # Electron-Forge
 out/
 dist/
+
+# Database files (local only, never commit)
+*.db
+*.sqlite
+*.sqlite3
+
+# Claude Code local configuration
+.claude/
+docs/superpowers/

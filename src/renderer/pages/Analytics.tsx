@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { AlertReason, AnalyticsData, ChangeType, ClosedWonOpp, ForecastChange, ForecastDifference, ForecastOpp, OppPushStats, Quota } from '../../shared/types';
 import { mapForecast, toCloseQuarter, calculateWeightedPipe } from '../../shared/utils';
+import { useFilters } from '../contexts/FilterContext';
 
 // ── Formatters ─────────────────────────────────────────────────
 
@@ -62,9 +63,11 @@ function quarterToDateRange(quarter: string): string {
   if (!range) return quarter;
 
   if (q === 4) {
-    return `${range.start}, ${range.startYear} - ${range.end}, ${range.endYear}`;
+    const q4Range = range as { start: string; end: string; startYear: number; endYear: number };
+    return `${q4Range.start}, ${q4Range.startYear} - ${q4Range.end}, ${q4Range.endYear}`;
   }
-  return `${range.start} - ${range.end}, ${range.year}`;
+  const normalRange = range as { start: string; end: string; year: number };
+  return `${normalRange.start} - ${normalRange.end}, ${normalRange.year}`;
 }
 
 // ── Constants ──────────────────────────────────────────────────
@@ -138,23 +141,14 @@ export default function Analytics() {
   const [loading, setLoading]   = useState(true);
   const [pageTab, setPageTab]   = useState<PageTab>('executive');
 
+  // Filters from context
+  const { filters, updateAnalyticsOverviewFilters, updateAnalyticsChangesFilters } = useFilters();
+
   // Overview filters
-  const [quarterFilter, setQuarterFilter]     = useState<Set<string>>(new Set([toCloseQuarter(new Date().toISOString().split('T')[0])]));
-  const [managerFilterOv, setManagerFilterOv] = useState<Set<string>>(new Set());
-  const [aiAeFilterOv, setAiAeFilterOv]       = useState<Set<string>>(new Set());
-  const [regionFilterOv, setRegionFilterOv]   = useState<Set<string>>(new Set());
-  const [segmentFilterOv, setSegmentFilterOv] = useState<Set<string>>(new Set());
+  const { quarterFilter, managerFilter: managerFilterOv, aiAeFilter: aiAeFilterOv, regionFilter: regionFilterOv, segmentFilter: segmentFilterOv } = filters.analyticsOverview;
 
   // Changes filters
-  const [changesTab, setChangesTab]         = useState<ChangesTab>('all');
-  const [aiAeFilter, setAiAeFilter]         = useState<Set<string>>(new Set());
-  const [managerFilter, setManagerFilter]   = useState<Set<string>>(new Set());
-  const [regionFilter, setRegionFilter]     = useState<Set<string>>(new Set());
-  const [segmentFilter, setSegmentFilter]   = useState<Set<string>>(new Set());
-  const [importFilter, setImportFilter]     = useState('');
-  const [chDatePreset, setChDatePreset]     = useState<'latest' | 'last7' | 'last14' | 'this_month' | 'custom'>('latest');
-  const [chCustomFrom, setChCustomFrom]     = useState('');
-  const [chCustomTo, setChCustomTo]         = useState('');
+  const { changesTab, aiAeFilter, managerFilter, regionFilter, segmentFilter, importFilter, chDatePreset, chCustomFrom, chCustomTo } = filters.analyticsChanges;
 
   const load = useCallback(async () => {
     const [d, o, cw, q] = await Promise.all([
@@ -212,15 +206,15 @@ export default function Analytics() {
             multiPushOpps={data?.multiPushOpps ?? []}
             forecastDifferences={data?.forecastDifferences ?? []}
             quarterFilter={quarterFilter}
-            setQuarterFilter={setQuarterFilter}
+            setQuarterFilter={(v) => updateAnalyticsOverviewFilters({ quarterFilter: v })}
             managerFilter={managerFilterOv}
-            setManagerFilter={setManagerFilterOv}
+            setManagerFilter={(v) => updateAnalyticsOverviewFilters({ managerFilter: v })}
             aiAeFilter={aiAeFilterOv}
-            setAiAeFilter={setAiAeFilterOv}
+            setAiAeFilter={(v) => updateAnalyticsOverviewFilters({ aiAeFilter: v })}
             regionFilter={regionFilterOv}
-            setRegionFilter={setRegionFilterOv}
+            setRegionFilter={(v) => updateAnalyticsOverviewFilters({ regionFilter: v })}
             segmentFilter={segmentFilterOv}
-            setSegmentFilter={setSegmentFilterOv}
+            setSegmentFilter={(v) => updateAnalyticsOverviewFilters({ segmentFilter: v })}
           />
         : <ExecutiveSummaryTab
             changes={data?.changes ?? []}
@@ -1169,7 +1163,7 @@ function ForecastDifferencesSection({
     .reduce((sum, o) => sum + (o.edited_bookings ?? o.bookings), 0);
 
   let dealBackedDelta = 0;
-  let closedWonDelta = cwInPeriod; // Always show total CW for the period
+  const closedWonDelta = cwInPeriod; // Always show total CW for the period
 
   if (snapshotStart && (snapshotEnd || liveOpps)) {
     // Calculate start state (Commit + ML)
@@ -1937,7 +1931,7 @@ function ExecutiveSummaryTab({
   });
   const cwOpps       = Object.values(cwOppMap).sort((a, b) => b.bookings - a.bookings);
   const totalClosed  = filteredCW.reduce((s, o) => s + (o.edited_bookings ?? o.bookings), 0);
-  const bigCwOpps    = cwOpps.filter((o) => (o.edited_bookings ?? o.bookings) >= 50_000);
+  const bigCwOpps    = cwOpps.filter((o) => o.bookings >= 50_000);
   const cwByProduct  = PRODUCTS.map((p) => {
     const rows = filteredCW.filter((o) => o.product.toLowerCase() === p.toLowerCase());
     return { product: p, deals: new Set(rows.map((o) => o.crm_opportunity_id)).size, bookings: rows.reduce((s, o) => s + (o.edited_bookings ?? o.bookings), 0) };
@@ -2230,7 +2224,7 @@ function ExecutiveSummaryTab({
         <div className="grid grid-cols-3 gap-3 mb-4">
           <BigCard label="Total Closed ARR"  value={totalClosed > 0 ? fmtDollar(totalClosed) : '—'} sub={`${cwOpps.length} deals`} color="green" />
           <BigCard label="Deals Closed"      value={String(cwOpps.length)} sub={presetLabel} color="gray" />
-          <BigCard label="Deals ≥ $50K"      value={String(bigCwOpps.length)} sub={bigCwOpps.length > 0 ? fmtDollar(bigCwOpps.reduce((s, o) => s + (o.edited_bookings ?? o.bookings), 0)) : 'none'} color="blue" />
+          <BigCard label="Deals ≥ $50K"      value={String(bigCwOpps.length)} sub={bigCwOpps.length > 0 ? fmtDollar(bigCwOpps.reduce((s, o) => s + o.bookings, 0)) : 'none'} color="blue" />
         </div>
 
         {cwByProduct.length > 0 && (

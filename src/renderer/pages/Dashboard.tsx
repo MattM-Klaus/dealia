@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import type { Account, ContactStatus } from '../../shared/types';
 import { daysUntil } from '../components/RenewalBadge';
 import ProductTags from '../components/ProductTags';
+import { useFilters } from '../contexts/FilterContext';
 
 const STATUS_CYCLE: ContactStatus[] = ['needs_action', 'in_contact', 'deal_live'];
 
@@ -63,10 +64,11 @@ export default function Dashboard() {
   const [loading, setLoading]           = useState(true);
   const [open, setOpen]                 = useState<Record<SectionKey, boolean>>(DEFAULT_OPEN);
   const [openManagers, setOpenManagers] = useState<Set<string>>(new Set());
-  const [managerFilter, setManagerFilter] = useState('');
-  const [productFilter, setProductFilter] = useState('');
-  const [aiAeFilter, setAiAeFilter]       = useState('');
   const [selected, setSelected]         = useState<Set<number>>(new Set());
+
+  // Filters from context
+  const { filters, updateDashboardFilters } = useFilters();
+  const { managerFilter, productFilter, aiAeFilter } = filters.dashboard;
 
   const load = useCallback(async () => {
     const data = await window.api.getAccounts();
@@ -150,7 +152,7 @@ export default function Dashboard() {
   // Apply all filters
   const renewing = renewingAll
     .filter((a) => {
-      if (managerFilter && (a.ae_manager?.trim() || 'Unassigned') !== managerFilter) return false;
+      if (managerFilter.size > 0 && !managerFilter.has(a.ae_manager?.trim() || 'Unassigned')) return false;
       if (productFilter && !a.target_products.includes(productFilter as any)) return false;
       if (aiAeFilter && a.account_owner !== aiAeFilter) return false;
       return true;
@@ -206,19 +208,18 @@ export default function Dashboard() {
           {/* Filters */}
           <div className="flex items-center gap-2 justify-end mb-4 flex-wrap">
             {allManagers.length > 1 && (
-              <select
-                value={managerFilter}
-                onChange={(e) => setManagerFilter(e.target.value)}
-                className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 outline-none focus:ring-2 focus:ring-green-400 bg-white"
-              >
-                <option value="">All Managers</option>
-                {allManagers.map((m) => <option key={m} value={m}>{m}</option>)}
-              </select>
+              <MultiSelect
+                options={allManagers}
+                selected={managerFilter}
+                onChange={(v) => updateDashboardFilters({ managerFilter: v })}
+                placeholder="All Managers"
+                noun="Managers"
+              />
             )}
             {allProducts.length > 1 && (
               <select
                 value={productFilter}
-                onChange={(e) => setProductFilter(e.target.value)}
+                onChange={(e) => updateDashboardFilters({ productFilter: e.target.value })}
                 className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 outline-none focus:ring-2 focus:ring-green-400 bg-white"
               >
                 <option value="">All Products</option>
@@ -228,16 +229,16 @@ export default function Dashboard() {
             {allAiAes.length > 1 && (
               <select
                 value={aiAeFilter}
-                onChange={(e) => setAiAeFilter(e.target.value)}
+                onChange={(e) => updateDashboardFilters({ aiAeFilter: e.target.value })}
                 className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 outline-none focus:ring-2 focus:ring-green-400 bg-white"
               >
                 <option value="">All AEs</option>
                 {allAiAes.map((a) => <option key={a} value={a}>{a}</option>)}
               </select>
             )}
-            {(managerFilter || productFilter || aiAeFilter) && (
+            {(managerFilter.size > 0 || productFilter || aiAeFilter) && (
               <button
-                onClick={() => { setManagerFilter(''); setProductFilter(''); setAiAeFilter(''); }}
+                onClick={() => updateDashboardFilters({ managerFilter: new Set(), productFilter: '', aiAeFilter: '' })}
                 className="text-xs text-gray-400 hover:text-gray-600 px-2"
               >
                 Clear
@@ -344,6 +345,81 @@ export default function Dashboard() {
             </div>
           )}
         </>
+      )}
+    </div>
+  );
+}
+
+// ── Multi-select dropdown ──────────────────────────────────────
+
+function MultiSelect({
+  options, selected, onChange, placeholder, noun,
+}: {
+  options: string[];
+  selected: Set<string>;
+  onChange: (next: Set<string>) => void;
+  placeholder: string;
+  noun: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, []);
+
+  const toggle = (val: string) => {
+    const next = new Set(selected);
+    next.has(val) ? next.delete(val) : next.add(val);
+    onChange(next);
+  };
+
+  const label = selected.size === 0 ? placeholder
+    : selected.size === 1 ? [...selected][0]
+    : `${selected.size} ${noun}`;
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className={`text-sm border rounded-lg px-3 py-1.5 flex items-center gap-1.5 outline-none bg-white ${
+          selected.size > 0
+            ? 'border-green-400 text-green-700 font-medium'
+            : 'border-gray-200 text-gray-600 hover:border-gray-300'
+        }`}
+      >
+        {label}
+        <span className="text-gray-400 text-[10px]">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && options.length > 0 && (
+        <div className="absolute left-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded-xl shadow-lg py-1.5 min-w-[180px]">
+          {selected.size > 0 && (
+            <>
+              <button
+                onClick={() => onChange(new Set())}
+                className="w-full text-left px-3 py-1.5 text-xs text-gray-400 hover:text-gray-600 hover:bg-gray-50"
+              >
+                Clear selection
+              </button>
+              <div className="border-t border-gray-100 my-1" />
+            </>
+          )}
+          {options.map((opt) => (
+            <label key={opt} className="flex items-center gap-2.5 px-3 py-2 hover:bg-gray-50 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={selected.has(opt)}
+                onChange={() => toggle(opt)}
+                className="accent-green-600 w-3.5 h-3.5 shrink-0"
+              />
+              <span className="text-sm text-gray-700">{opt}</span>
+            </label>
+          ))}
+        </div>
       )}
     </div>
   );

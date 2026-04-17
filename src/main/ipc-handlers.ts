@@ -1,4 +1,4 @@
-import { ipcMain, dialog, shell, Notification, app } from 'electron';
+import { ipcMain, dialog, shell, Notification, app, BrowserWindow } from 'electron';
 import Anthropic from '@anthropic-ai/sdk';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -395,7 +395,7 @@ ${context}`;
       }
 
       // Get the window and store original size
-      const win = event.sender.getOwnerBrowserWindow();
+      const win = BrowserWindow.fromWebContents(event.sender);
       if (!win) throw new Error('No window found');
 
       const originalBounds = win.getBounds();

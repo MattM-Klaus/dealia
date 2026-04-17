@@ -114,7 +114,7 @@ export function importSnowflakeCsv(filePath: string): CsvImportResult {
     const closedLostOpps: Omit<ClosedWonOpp, 'id' | 'created_at' | 'updated_at'>[] = [];
 
     let skippedByFilter = 0;
-    let errors: string[] = [];
+    const errors: string[] = [];
 
     // Debug: collect unique AI AE values to help diagnose filter mismatches
     const uniqueAiAes = new Set<string>();
@@ -216,6 +216,9 @@ export function importSnowflakeCsv(filePath: string): CsvImportResult {
             ais_close_date_manual: 0,
             ais_top_deal: 0,
             push_count: 0,
+            total_days_pushed: 0,
+            stage_entered_at: null,
+            exclude_from_analysis: 0,
           });
         }
       } catch (err) {

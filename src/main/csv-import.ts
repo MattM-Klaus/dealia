@@ -4,7 +4,7 @@ import { upsertAccount } from './database';
 import type { CsvImportResult, Product } from '../shared/types';
 
 // Converts "2027Q1" → "2027-03-31", "2026Q3" → "2026-09-30", etc.
-function parseRenewalQtr(raw: string): string | null {
+export function parseRenewalQtr(raw: string): string | null {
   if (!raw) return null;
 
   const match =
@@ -45,26 +45,26 @@ function parseRenewalQtr(raw: string): string | null {
   return `${year}-${monthDay}`;
 }
 
-function parseDate(raw: string): string | null {
+export function parseDate(raw: string): string | null {
   if (!raw) return null;
   const d = new Date(raw);
   if (isNaN(d.getTime())) return null;
   return d.toISOString().split('T')[0];
 }
 
-function parseARR(raw: string): number {
+export function parseARR(raw: string): number {
   if (!raw) return 0;
   const cleaned = raw.replace(/[$,\s]/g, '');
   const val = parseFloat(cleaned);
   return isNaN(val) ? 0 : val;
 }
 
-function isYes(val: string): boolean {
+export function isYes(val: string): boolean {
   return val?.trim().toLowerCase() === 'yes';
 }
 
 // Current Products — from "Has AIAA", "Has Copilot", "Has QA or WEM" columns
-function parseCurrentProducts(row: Record<string, string>): Product[] {
+export function parseCurrentProducts(row: Record<string, string>): Product[] {
   const products: Product[] = [];
   if (isYes(row['has_aiaa'])) products.push('AI Agents');
   if (isYes(row['has_copilot'])) products.push('Copilot');
@@ -74,7 +74,7 @@ function parseCurrentProducts(row: Record<string, string>): Product[] {
 
 // Target Products — from "Matched Segment(s)" column
 // e.g. "Copilot, QA/WEM" → ["Copilot", "QA"]
-function parseTargetProducts(raw: string): Product[] {
+export function parseTargetProducts(raw: string): Product[] {
   if (!raw) return [];
   const products: Product[] = [];
   const lower = raw.toLowerCase();
@@ -86,7 +86,7 @@ function parseTargetProducts(raw: string): Product[] {
   return products;
 }
 
-function buildNotes(row: Record<string, string>): string {
+export function buildNotes(row: Record<string, string>): string {
   const parts: string[] = [];
   const add = (label: string, key: string) => {
     const val = row[key]?.trim();

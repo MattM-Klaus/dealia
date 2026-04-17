@@ -10,11 +10,13 @@ interface ReconciliationResult {
   account_name: string;
   ae_name: string;
   close_date: string;
+  tableau_close_date: string | null;
+  xactly_close_date: string | null;
   product_book: string;
   investigation_status: string | null;
 }
 
-type SortColumn = 'opp_number' | 'account_name' | 'ae_name' | 'close_date' | 'issue_type' | 'tableau_amount' | 'xactly_amount' | 'variance';
+type SortColumn = 'opp_number' | 'account_name' | 'ae_name' | 'close_date' | 'tableau_close_date' | 'xactly_close_date' | 'issue_type' | 'tableau_amount' | 'xactly_amount' | 'variance';
 type SortDirection = 'asc' | 'desc';
 
 export default function CommissionReconciliation() {

@@ -7,18 +7,40 @@ import { MakerDMG } from '@electron-forge/maker-dmg';
 import { VitePlugin } from '@electron-forge/plugin-vite';
 import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
+import { build } from 'vite';
+import path from 'path';
+import fs from 'fs-extra';
 
 const config: ForgeConfig = {
   packagerConfig: {
     asar: false,
     name: 'Dealia',
     executableName: 'Dealia',
+    icon: './src/assets/icon',
   },
   rebuildConfig: {},
   hooks: {
+    prePackage: async () => {
+      console.log('[prePackage] Building renderer for production...');
+
+      // Build the renderer using Vite (outputs to dist/)
+      await build({
+        configFile: path.join(__dirname, 'vite.renderer.config.mts'),
+      });
+
+      console.log('[prePackage] Renderer built successfully to dist/');
+    },
     packageAfterCopy: async (_config, buildPath) => {
-      const fs = require('fs-extra');
-      const path = require('path');
+      console.log('[packageAfterCopy] Copying renderer files...');
+
+      // Copy renderer files from dist/ to package
+      const distPath = path.join(__dirname, 'dist');
+      const rendererPath = path.join(buildPath, '.vite/renderer/main_window');
+
+      await fs.ensureDir(rendererPath);
+      await fs.copy(distPath, rendererPath);
+
+      console.log('[packageAfterCopy] Renderer files copied');
 
       // Copy better-sqlite3 and its dependencies
       const modulesToCopy = ['better-sqlite3', 'bindings', 'prebuild-install', 'file-uri-to-path'];
@@ -56,12 +78,9 @@ const config: ForgeConfig = {
           target: 'preload',
         },
       ],
-      renderer: [
-        {
-          name: 'main_window',
-          config: 'vite.renderer.config.mts',
-        },
-      ],
+      // Renderer is built manually in prePackage hook to avoid dev server startup issues
+      // For development, use concurrently to manage Vite separately
+      renderer: [],
     }),
     // Fuses are used to enable/disable various Electron functionality
     // at package time, before code signing the application
