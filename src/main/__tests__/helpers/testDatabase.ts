@@ -52,6 +52,10 @@ function runTestMigrations(db: Database.Database): void {
       target_products TEXT    NOT NULL DEFAULT '[]',
       sfdc_link       TEXT    NOT NULL DEFAULT '',
       notes           TEXT    DEFAULT '',
+      contact_status  TEXT    NOT NULL DEFAULT 'needs_action',
+      contacted_at    TEXT    DEFAULT NULL,
+      ae_manager      TEXT    NOT NULL DEFAULT '',
+      crm_account_id  TEXT    DEFAULT NULL,
       created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
       updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
     );
