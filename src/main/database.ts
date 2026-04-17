@@ -13,6 +13,16 @@ export function initDatabase(): void {
   runMigrations();
 }
 
+/**
+ * Sets the database instance (primarily for testing).
+ * Allows tests to inject an in-memory test database.
+ *
+ * @param database - The database instance to use
+ */
+export function setDatabase(database: Database.Database): void {
+  db = database;
+}
+
 function runMigrations(): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS accounts (
