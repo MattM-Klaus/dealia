@@ -30,6 +30,8 @@ const createWindow = () => {
   if (!app.isPackaged) {
     mainWindow.loadURL('http://localhost:5173');
   } else {
+    // __dirname in packaged app is: .vite/build/
+    // We need to reach: .vite/renderer/main_window/index.html
     const indexPath = path.join(__dirname, '../renderer/main_window/index.html');
     mainWindow.loadFile(indexPath);
   }

@@ -18,7 +18,9 @@ const config: ForgeConfig = {
     executableName: 'Dealia',
     icon: './src/assets/icon',
   },
-  rebuildConfig: {},
+  rebuildConfig: {
+    onlyModules: ['better-sqlite3'], // Rebuild better-sqlite3 for Electron
+  },
   hooks: {
     prePackage: async () => {
       console.log('[prePackage] Building renderer for production...');
@@ -42,7 +44,8 @@ const config: ForgeConfig = {
 
       console.log('[packageAfterCopy] Renderer files copied');
 
-      // Copy better-sqlite3 and its dependencies
+      // Copy better-sqlite3 and its dependencies so they can be rebuilt for Electron
+      console.log('[packageAfterCopy] Copying better-sqlite3 dependencies...');
       const modulesToCopy = ['better-sqlite3', 'bindings', 'prebuild-install', 'file-uri-to-path'];
 
       for (const moduleName of modulesToCopy) {
@@ -50,8 +53,10 @@ const config: ForgeConfig = {
         const destPath = path.join(buildPath, 'node_modules', moduleName);
         if (await fs.pathExists(sourcePath)) {
           await fs.copy(sourcePath, destPath);
+          console.log(`[packageAfterCopy] Copied ${moduleName}`);
         }
       }
+      console.log('[packageAfterCopy] Dependencies copied - will be rebuilt for Electron');
     },
   },
   makers: [
