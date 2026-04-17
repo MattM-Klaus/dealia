@@ -2,6 +2,25 @@
 
 Electron-based desktop application for managing sales deals and pipeline tracking for Zendesk Sales.
 
+## What's New in v1.5.0
+
+### Testing Infrastructure 🧪
+- Comprehensive test suite with 187 passing tests
+- Vitest testing framework with full TypeScript support
+- 98.96% coverage on CSV imports, 100% on utilities
+- CI/CD integration with automated testing
+
+### Quality Improvements ✨
+- TypeScript 5.x with strict mode enabled
+- 34 type errors fixed across the codebase
+- Improved type safety for better developer experience
+- Cross-platform test compatibility (macOS/Linux CI)
+
+### Developer Experience 🛠️
+- In-memory SQLite test database helper
+- Comprehensive test coverage for database operations
+- UPSERT logic improvements in commission imports
+
 ## Development Setup
 
 ### Prerequisites
@@ -41,6 +60,21 @@ npm run package
 ```bash
 npm run make
 ```
+
+## Development
+
+### Running Tests
+```bash
+npm test                  # Run all tests
+npm run test:ui          # Run tests with UI
+npm run test:coverage    # Generate coverage report
+```
+
+### Test Structure
+- Database CRUD tests (19 tests)
+- CSV import tests (48 tests, 98.96% coverage)
+- Commission import tests (22 tests)
+- Shared utilities tests (100% coverage)
 
 ## Project Structure
 
