@@ -99,3 +99,4 @@ dist/
 
 # Claude Code local configuration
 .claude/
+docs/superpowers/
