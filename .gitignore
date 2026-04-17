@@ -96,3 +96,6 @@ dist/
 *.db
 *.sqlite
 *.sqlite3
+
+# Claude Code local configuration
+.claude/
