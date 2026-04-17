@@ -6,6 +6,8 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    pool: 'forks',
+    singleFork: true,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],

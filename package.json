@@ -16,9 +16,9 @@
     "make": "npm run build:icons && electron-forge make",
     "publish": "electron-forge publish",
     "lint": "eslint --ext .ts,.tsx .",
-    "test": "vitest",
-    "test:ui": "vitest --ui",
-    "test:coverage": "vitest --coverage"
+    "test": "bash scripts/test.sh",
+    "test:ui": "bash scripts/test.sh --ui",
+    "test:coverage": "bash scripts/test.sh --coverage"
   },
   "keywords": [],
   "author": "matt.marontate",
@@ -62,7 +62,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
-    "better-sqlite3": "^12.6.2",
+    "better-sqlite3": "^12.9.0",
     "electron-squirrel-startup": "^1.0.1",
     "node-cron": "^4.2.1",
     "papaparse": "^5.5.3",
