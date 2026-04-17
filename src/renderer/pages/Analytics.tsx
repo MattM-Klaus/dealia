@@ -1161,7 +1161,7 @@ function ForecastDifferencesSection({
     .reduce((sum, o) => sum + (o.edited_bookings ?? o.bookings), 0);
 
   let dealBackedDelta = 0;
-  let closedWonDelta = cwInPeriod; // Always show total CW for the period
+  const closedWonDelta = cwInPeriod; // Always show total CW for the period
 
   if (snapshotStart && (snapshotEnd || liveOpps)) {
     // Calculate start state (Commit + ML)

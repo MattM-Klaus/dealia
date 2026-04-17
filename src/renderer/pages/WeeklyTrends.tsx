@@ -399,8 +399,8 @@ export default function WeeklyTrends() {
   const quarterFilteredOpps = opps.filter((o) => toCloseQuarter(o.close_date) === currentQuarter);
 
   // Then apply region filter
-  let regionFilteredOpps = selectedRegion === 'All' ? quarterFilteredOpps : quarterFilteredOpps.filter((o) => o.region === selectedRegion);
-  let regionFilteredClosedWon = selectedRegion === 'All' ? closedWon : closedWon.filter((o) => o.region === selectedRegion);
+  const regionFilteredOpps = selectedRegion === 'All' ? quarterFilteredOpps : quarterFilteredOpps.filter((o) => o.region === selectedRegion);
+  const regionFilteredClosedWon = selectedRegion === 'All' ? closedWon : closedWon.filter((o) => o.region === selectedRegion);
 
   // Then apply manager filter (if any managers selected)
   const filteredOpps = selectedManagers.size > 0
@@ -875,22 +875,21 @@ export default function WeeklyTrends() {
         } else {
           const snapshot = snapshots.filter((s) => s.date <= selectedWeekStartStr).sort((a, b) => b.date.localeCompare(a.date))[0];
           const snapshotData = snapshot?.data || [];
-          let quarterFiltered = snapshotData.filter((o) => toCloseQuarter(o.close_date) === currentQuarter);
+          const quarterFiltered = snapshotData.filter((o) => toCloseQuarter(o.close_date) === currentQuarter);
           // Apply region filter
-          let regionFiltered = selectedRegion === 'All' ? quarterFiltered : quarterFiltered.filter((o) => o.region === selectedRegion);
+          const regionFiltered = selectedRegion === 'All' ? quarterFiltered : quarterFiltered.filter((o) => o.region === selectedRegion);
           // Apply manager filter if any selected
           currentWeekOpps = selectedManagers.size > 0 ? regionFiltered.filter((o) => selectedManagers.has(o.manager_name)) : regionFiltered;
         }
 
         // Get previous week opps (use snapshot from START of previous week for Monday-to-Monday comparison)
-        let previousWeekOpps: ForecastOpp[];
         const snapshot = snapshots.filter((s) => s.date <= previousWeekStartStr).sort((a, b) => b.date.localeCompare(a.date))[0];
         const snapshotData = snapshot?.data || [];
-        let quarterFiltered = snapshotData.filter((o) => toCloseQuarter(o.close_date) === currentQuarter);
+        const quarterFiltered = snapshotData.filter((o) => toCloseQuarter(o.close_date) === currentQuarter);
         // Apply region filter
-        let regionFiltered = selectedRegion === 'All' ? quarterFiltered : quarterFiltered.filter((o) => o.region === selectedRegion);
+        const regionFiltered = selectedRegion === 'All' ? quarterFiltered : quarterFiltered.filter((o) => o.region === selectedRegion);
         // Apply manager filter if any selected
-        previousWeekOpps = selectedManagers.size > 0 ? regionFiltered.filter((o) => selectedManagers.has(o.manager_name)) : regionFiltered;
+        const previousWeekOpps: ForecastOpp[] = selectedManagers.size > 0 ? regionFiltered.filter((o) => selectedManagers.has(o.manager_name)) : regionFiltered;
 
         // Get closed won this week
         const closedWonThisWeekFiltered = filteredClosedWon.filter((o) => {

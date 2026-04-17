@@ -198,10 +198,16 @@ function runMigrations(): void {
   `);
   // Safe migrations for quarterly targets and region
   for (const col of ['q1_target', 'q2_target', 'q3_target', 'q4_target']) {
-    try { db.exec(`ALTER TABLE quotas ADD COLUMN ${col} REAL NOT NULL DEFAULT 0`); } catch {}
+    try { db.exec(`ALTER TABLE quotas ADD COLUMN ${col} REAL NOT NULL DEFAULT 0`); } catch (error) {
+      // Column already exists, safe to ignore
+    }
   }
-  try { db.exec(`ALTER TABLE quotas ADD COLUMN region TEXT NOT NULL DEFAULT ''`); } catch {}
-  try { db.exec(`ALTER TABLE forecast_opps ADD COLUMN ais_top_deal INTEGER DEFAULT 0`); } catch {}
+  try { db.exec(`ALTER TABLE quotas ADD COLUMN region TEXT NOT NULL DEFAULT ''`); } catch (error) {
+    // Column already exists, safe to ignore
+  }
+  try { db.exec(`ALTER TABLE forecast_opps ADD COLUMN ais_top_deal INTEGER DEFAULT 0`); } catch (error) {
+    // Column already exists, safe to ignore
+  }
 
   // forecast_changes: persists diffs detected on each pipeline CSV upload
   db.exec(`

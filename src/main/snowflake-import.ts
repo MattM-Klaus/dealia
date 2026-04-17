@@ -114,7 +114,7 @@ export function importSnowflakeCsv(filePath: string): CsvImportResult {
     const closedLostOpps: Omit<ClosedWonOpp, 'id' | 'created_at' | 'updated_at'>[] = [];
 
     let skippedByFilter = 0;
-    let errors: string[] = [];
+    const errors: string[] = [];
 
     // Debug: collect unique AI AE values to help diagnose filter mismatches
     const uniqueAiAes = new Set<string>();

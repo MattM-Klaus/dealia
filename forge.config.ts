@@ -7,6 +7,9 @@ import { MakerDMG } from '@electron-forge/maker-dmg';
 import { VitePlugin } from '@electron-forge/plugin-vite';
 import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
+import { build } from 'vite';
+import path from 'path';
+import fs from 'fs-extra';
 
 const config: ForgeConfig = {
   packagerConfig: {
@@ -18,9 +21,6 @@ const config: ForgeConfig = {
   rebuildConfig: {},
   hooks: {
     prePackage: async () => {
-      const { build } = require('vite');
-      const path = require('path');
-
       console.log('[prePackage] Building renderer for production...');
 
       // Build the renderer using Vite (outputs to dist/)
@@ -31,9 +31,6 @@ const config: ForgeConfig = {
       console.log('[prePackage] Renderer built successfully to dist/');
     },
     packageAfterCopy: async (_config, buildPath) => {
-      const fs = require('fs-extra');
-      const path = require('path');
-
       console.log('[packageAfterCopy] Copying renderer files...');
 
       // Copy renderer files from dist/ to package
