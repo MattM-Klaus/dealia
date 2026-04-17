@@ -294,6 +294,7 @@ export function importHistoricalClosedWonCsv(filePath: string, customDate: strin
         ai_ae: row['ai_ae']?.trim() || '',
         close_date: parseDate(row['closedate'] || ''),
         bookings: parseAmount(row['bookings'] || '0'),
+        edited_bookings: null,
       });
     } catch (err) {
       result.failed++;
@@ -500,6 +501,10 @@ export function importForecastCsv(filePath: string): ForecastImportResult {
       ais_forecast_manual:         aisForecastManual,
       ais_close_date_manual:       aisCloseDateManual,
       ais_top_deal:                aisTopDeal,
+      push_count:                  0,
+      total_days_pushed:           0,
+      stage_entered_at:            null,
+      exclude_from_analysis:       0,
     });
   }
 
@@ -631,6 +636,7 @@ export function importClosedWonCsv(filePath: string): ForecastImportResult {
         ai_ae: row['ai_ae']?.trim() || '',
         close_date: parseDate(row['closedate'] || ''),
         bookings: parseAmount(bookingsValue),
+        edited_bookings: null,
       });
     } catch (err) {
       result.failed++;

@@ -63,9 +63,11 @@ function quarterToDateRange(quarter: string): string {
   if (!range) return quarter;
 
   if (q === 4) {
-    return `${range.start}, ${range.startYear} - ${range.end}, ${range.endYear}`;
+    const q4Range = range as { start: string; end: string; startYear: number; endYear: number };
+    return `${q4Range.start}, ${q4Range.startYear} - ${q4Range.end}, ${q4Range.endYear}`;
   }
-  return `${range.start} - ${range.end}, ${range.year}`;
+  const normalRange = range as { start: string; end: string; year: number };
+  return `${normalRange.start} - ${normalRange.end}, ${normalRange.year}`;
 }
 
 // ── Constants ──────────────────────────────────────────────────
@@ -1929,7 +1931,7 @@ function ExecutiveSummaryTab({
   });
   const cwOpps       = Object.values(cwOppMap).sort((a, b) => b.bookings - a.bookings);
   const totalClosed  = filteredCW.reduce((s, o) => s + (o.edited_bookings ?? o.bookings), 0);
-  const bigCwOpps    = cwOpps.filter((o) => (o.edited_bookings ?? o.bookings) >= 50_000);
+  const bigCwOpps    = cwOpps.filter((o) => o.bookings >= 50_000);
   const cwByProduct  = PRODUCTS.map((p) => {
     const rows = filteredCW.filter((o) => o.product.toLowerCase() === p.toLowerCase());
     return { product: p, deals: new Set(rows.map((o) => o.crm_opportunity_id)).size, bookings: rows.reduce((s, o) => s + (o.edited_bookings ?? o.bookings), 0) };
@@ -2222,7 +2224,7 @@ function ExecutiveSummaryTab({
         <div className="grid grid-cols-3 gap-3 mb-4">
           <BigCard label="Total Closed ARR"  value={totalClosed > 0 ? fmtDollar(totalClosed) : '—'} sub={`${cwOpps.length} deals`} color="green" />
           <BigCard label="Deals Closed"      value={String(cwOpps.length)} sub={presetLabel} color="gray" />
-          <BigCard label="Deals ≥ $50K"      value={String(bigCwOpps.length)} sub={bigCwOpps.length > 0 ? fmtDollar(bigCwOpps.reduce((s, o) => s + (o.edited_bookings ?? o.bookings), 0)) : 'none'} color="blue" />
+          <BigCard label="Deals ≥ $50K"      value={String(bigCwOpps.length)} sub={bigCwOpps.length > 0 ? fmtDollar(bigCwOpps.reduce((s, o) => s + o.bookings, 0)) : 'none'} color="blue" />
         </div>
 
         {cwByProduct.length > 0 && (

@@ -168,7 +168,14 @@ export default function WeeklyTrends() {
 
   // Week selection state
   const currentQuarter = toCloseQuarter(new Date().toISOString().split('T')[0]);
-  const weeks = React.useMemo(() => getQuarterWeeks(currentQuarter), [currentQuarter]);
+  const weeks = React.useMemo(() =>
+    getQuarterWeeks(currentQuarter).map(w => ({
+      ...w,
+      weekStart: w.start,
+      weekEnd: w.end
+    })),
+    [currentQuarter]
+  );
   const currentWeekIndex = weeks.findIndex((w) => {
     const now = new Date();
     return now >= w.start && now <= w.end;
@@ -211,7 +218,7 @@ export default function WeeklyTrends() {
       window.api.getForecastOpps(),
       window.api.getClosedWonOpps(),
       window.api.getAnalyticsData().then((d) => d?.changes || []),
-      window.api.getPipelineSnapshots?.() || Promise.resolve([]),
+      window.api.getPipelineSnapshots(),
       window.api.getExcludedDealIds(),
     ]);
     setOpps(o);
@@ -722,19 +729,19 @@ export default function WeeklyTrends() {
               <MetricCard
                 label="Pipeline"
                 value={fmtDollar(selectedWeek.vpPipeline)}
-                delta={previousWeek && fmtDelta(selectedWeek.vpPipeline, previousWeek.vpPipeline)}
+                delta={previousWeek ? fmtDelta(selectedWeek.vpPipeline, previousWeek.vpPipeline) : undefined}
                 subtitle={`${weeks.length} weeks`}
               />
               <MetricCard
                 label="Deal Backed"
                 value={fmtDollar(selectedWeek.vpDealBacked)}
-                delta={previousWeek && fmtDelta(selectedWeek.vpDealBacked, previousWeek.vpDealBacked)}
+                delta={previousWeek ? fmtDelta(selectedWeek.vpDealBacked, previousWeek.vpDealBacked) : undefined}
                 subtitle="CW + Commit + ML"
               />
               <MetricCard
                 label="Weighted Pipe"
                 value={fmtDollar(selectedWeek.weightedPipe)}
-                delta={previousWeek && fmtDelta(selectedWeek.weightedPipe, previousWeek.weightedPipe)}
+                delta={previousWeek ? fmtDelta(selectedWeek.weightedPipe, previousWeek.weightedPipe) : undefined}
                 subtitle="CW + Stage Win Rates"
               />
               <MetricCard
@@ -755,11 +762,11 @@ export default function WeeklyTrends() {
                 label="Big Deals"
                 value={String(selectedWeek.bigDealsCount)}
                 delta={
-                  previousWeek && {
+                  previousWeek ? {
                     text: `${selectedWeek.bigDealsCount - previousWeek.bigDealsCount >= 0 ? '+' : ''}${selectedWeek.bigDealsCount - previousWeek.bigDealsCount}`,
                     arrow: selectedWeek.bigDealsCount > previousWeek.bigDealsCount ? '↑' : selectedWeek.bigDealsCount < previousWeek.bigDealsCount ? '↓' : '→',
                     color: selectedWeek.bigDealsCount > previousWeek.bigDealsCount ? 'text-emerald-600' : selectedWeek.bigDealsCount < previousWeek.bigDealsCount ? 'text-red-600' : 'text-gray-500',
-                  }
+                  } : undefined
                 }
                 subtitle=">$100K opps"
               />
@@ -773,19 +780,19 @@ export default function WeeklyTrends() {
               <MetricCard
                 label="Pipeline"
                 value={fmtDollar(selectedWeek.aisPipeline)}
-                delta={previousWeek && fmtDelta(selectedWeek.aisPipeline, previousWeek.aisPipeline)}
+                delta={previousWeek ? fmtDelta(selectedWeek.aisPipeline, previousWeek.aisPipeline) : undefined}
                 subtitle={`${weeks.length} weeks`}
               />
               <MetricCard
                 label="Deal Backed"
                 value={fmtDollar(selectedWeek.aisDealBacked)}
-                delta={previousWeek && fmtDelta(selectedWeek.aisDealBacked, previousWeek.aisDealBacked)}
+                delta={previousWeek ? fmtDelta(selectedWeek.aisDealBacked, previousWeek.aisDealBacked) : undefined}
                 subtitle="CW + Commit + ML"
               />
               <MetricCard
                 label="Weighted Pipe"
                 value={fmtDollar(selectedWeek.weightedPipe)}
-                delta={previousWeek && fmtDelta(selectedWeek.weightedPipe, previousWeek.weightedPipe)}
+                delta={previousWeek ? fmtDelta(selectedWeek.weightedPipe, previousWeek.weightedPipe) : undefined}
                 subtitle="CW + Stage Win Rates"
               />
               <MetricCard
@@ -806,11 +813,11 @@ export default function WeeklyTrends() {
                 label="Big Deals"
                 value={String(selectedWeek.bigDealsCount)}
                 delta={
-                  previousWeek && {
+                  previousWeek ? {
                     text: `${selectedWeek.bigDealsCount - previousWeek.bigDealsCount >= 0 ? '+' : ''}${selectedWeek.bigDealsCount - previousWeek.bigDealsCount}`,
                     arrow: selectedWeek.bigDealsCount > previousWeek.bigDealsCount ? '↑' : selectedWeek.bigDealsCount < previousWeek.bigDealsCount ? '↓' : '→',
                     color: selectedWeek.bigDealsCount > previousWeek.bigDealsCount ? 'text-emerald-600' : selectedWeek.bigDealsCount < previousWeek.bigDealsCount ? 'text-red-600' : 'text-gray-500',
-                  }
+                  } : undefined
                 }
                 subtitle=">$100K opps"
               />

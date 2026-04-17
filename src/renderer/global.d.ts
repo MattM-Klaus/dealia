@@ -40,7 +40,8 @@ declare global {
       getForecastOpps(): Promise<ForecastOpp[]>;
       getClosedWonOpps(): Promise<ClosedWonOpp[]>;
       getClosedLostOpps(): Promise<ClosedWonOpp[]>;
-      getPipelineSnapshots(): Promise<Array<{ date: string; data: ForecastOpp[] }>>;
+      getPipelineSnapshots(): Promise<Array<{ date: string; importedAt: string; data: ForecastOpp[] }>>;
+
       importForecastPipeline(filePath: string): Promise<ForecastImportResult>;
       importForecastClosedWon(filePath: string): Promise<ForecastImportResult>;
       importHistoricalCsv(filePath: string, customDate: string): Promise<ForecastImportResult>;
