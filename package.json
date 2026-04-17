@@ -16,9 +16,9 @@
     "make": "npm run build:icons && electron-forge make",
     "publish": "electron-forge publish",
     "lint": "eslint --ext .ts,.tsx .",
-    "test": "vitest",
-    "test:ui": "vitest --ui",
-    "test:coverage": "vitest --coverage"
+    "test": "/opt/homebrew/bin/node node_modules/.bin/vitest",
+    "test:ui": "/opt/homebrew/bin/node node_modules/.bin/vitest --ui",
+    "test:coverage": "/opt/homebrew/bin/node node_modules/.bin/vitest --coverage"
   },
   "keywords": [],
   "author": "matt.marontate",

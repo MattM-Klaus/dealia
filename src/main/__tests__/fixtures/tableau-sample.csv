@@ -1,0 +1,4 @@
+Crm Opportunity Id	OPPORTUNITY_NUMBER_C	Account Name	AE Name	Manager Name	Product	Bookings	Closedate	Raw Closedate
+0061234567890ABC	00123456	Acme Corporation	John Smith	Jane Doe	AI Agents	150000	2/15/2026	02/15/2026
+0061234567890DEF	00123457	Beta Industries	Bob Johnson	Jane Doe	Copilot	75000	2/20/2026	02/20/2026
+0061234567890GHI	00123458	Gamma LLC	Alice Williams	Tom Brown	QA	250000	2/28/2026	02/28/2026

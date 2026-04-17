@@ -1545,6 +1545,11 @@ export function importXactlyCommissions(data: {
   credit_amount: number;
   period: string;
 }[]): { inserted: number; updated: number } {
+  const checkStmt = db.prepare(`
+    SELECT 1 FROM xactly_commissions
+    WHERE opportunity_number = ? AND credit_type = ? AND period = ?
+  `);
+
   const stmt = db.prepare(`
     INSERT INTO xactly_commissions (opportunity_number, customer_name, commissionable_date, credit_type, credit_amount, period)
     VALUES (?, ?, ?, ?, ?, ?)
@@ -1560,7 +1565,14 @@ export function importXactlyCommissions(data: {
 
   const transaction = db.transaction(() => {
     for (const row of data) {
-      const result = stmt.run(
+      // Check if row exists before insert
+      const exists = checkStmt.get(
+        row.opportunity_number,
+        row.credit_type,
+        row.period
+      );
+
+      stmt.run(
         row.opportunity_number,
         row.customer_name,
         row.commissionable_date,
@@ -1568,10 +1580,11 @@ export function importXactlyCommissions(data: {
         row.credit_amount,
         row.period
       );
-      if (result.changes > 0) {
-        inserted++;
-      } else {
+
+      if (exists) {
         updated++;
+      } else {
+        inserted++;
       }
     }
   });
@@ -1591,6 +1604,11 @@ export function importTableauClosedWon(data: {
   close_date: string;
   period: string;
 }[]): { inserted: number; updated: number } {
+  const checkStmt = db.prepare(`
+    SELECT 1 FROM tableau_closed_won
+    WHERE opportunity_number = ? AND product = ? AND period = ?
+  `);
+
   const stmt = db.prepare(`
     INSERT INTO tableau_closed_won (opportunity_number, crm_opportunity_id, account_name, ae_name, manager_name, product, bookings, close_date, period)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1609,7 +1627,14 @@ export function importTableauClosedWon(data: {
 
   const transaction = db.transaction(() => {
     for (const row of data) {
-      const result = stmt.run(
+      // Check if row exists before insert
+      const exists = checkStmt.get(
+        row.opportunity_number,
+        row.product,
+        row.period
+      );
+
+      stmt.run(
         row.opportunity_number,
         row.crm_opportunity_id,
         row.account_name,
@@ -1620,10 +1645,11 @@ export function importTableauClosedWon(data: {
         row.close_date,
         row.period
       );
-      if (result.changes > 0) {
-        inserted++;
-      } else {
+
+      if (exists) {
         updated++;
+      } else {
+        inserted++;
       }
     }
   });
