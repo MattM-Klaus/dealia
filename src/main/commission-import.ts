@@ -157,8 +157,8 @@ export async function importTableauCSV(filePath: string, period: string): Promis
               bookings: parseAmount(row['Bookings']),
               close_date: parseDate(row['Raw Closedate'] || row['Closedate']), // Use Raw Closedate, fallback to Closedate
               period,
-            }))
-            .filter(row => periodMatchesDate(period, row.close_date)); // Only include deals that match the period
+            }));
+            // Period filter removed - import all deals in CSV regardless of close date
 
           console.log('[importTableauCSV] Filtered data count:', data.length);
           console.log('[importTableauCSV] Sample data:', data[0]);

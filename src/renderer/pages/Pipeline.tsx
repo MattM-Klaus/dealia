@@ -179,6 +179,21 @@ export default function Pipeline() {
   }
 
   async function handleSnowflakeSync() {
+    // Get current settings to show user their AI AE filter
+    const settings = await window.api.getSettings();
+    const aiAeTeam = settings.my_ai_ae_team || [];
+
+    // Show confirmation dialog
+    const filterText = aiAeTeam.length > 0
+      ? `Your AI AE Team Filter:\n${aiAeTeam.join(', ')}\n\nOnly deals assigned to these AI AEs will be synced.`
+      : `⚠️ WARNING: No AI AE Team Filter configured!\n\nYou will sync ALL opportunities in Snowflake (entire org).\n\nGo to Settings → Snowflake Sync Filter to configure your team.`;
+
+    const message = `${filterText}\n\n⚠️ This will replace your current pipeline data.\n\nYour manual AIS edits will be preserved.\n\nContinue with sync?`;
+
+    if (!confirm(message)) {
+      return; // User cancelled
+    }
+
     // Snapshot current tile values before the reload
     setPrevTiles({ ...tileRef.current });
 

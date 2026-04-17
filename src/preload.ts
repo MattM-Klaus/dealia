@@ -62,6 +62,9 @@ contextBridge.exposeInMainWorld('api', {
   getExcludedDealIds: (): Promise<string[]> =>
     ipcRenderer.invoke('forecast:getExcludedDealIds'),
 
+  resetAisArrToTableau: (): Promise<{ ok: boolean; updated: number }> =>
+    ipcRenderer.invoke('forecast:resetAisArrToTableau'),
+
   dealiaChat: (
     messages: { role: 'user' | 'assistant'; content: string }[],
     context: string,
@@ -95,4 +98,10 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('dealBacked:getReasons', importedAt),
   setDealBackedReason: (crmOpportunityId: string, importedAt: string, reason: string | null): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke('dealBacked:setReason', crmOpportunityId, importedAt, reason),
+
+  // Weekly Notes
+  getWeeklyNotes: (weekStart: string, region: string): Promise<string | null> =>
+    ipcRenderer.invoke('weeklyNotes:get', weekStart, region),
+  setWeeklyNotes: (weekStart: string, region: string, notes: string | null): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke('weeklyNotes:set', weekStart, region, notes),
 });
