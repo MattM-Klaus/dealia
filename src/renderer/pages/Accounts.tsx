@@ -5,6 +5,7 @@ import AccountTable from '../components/AccountTable';
 import AccountForm from '../components/AccountForm';
 import ImportModal from '../components/ImportModal';
 import ConfirmDialog from '../components/ConfirmDialog';
+import { useFilters } from '../contexts/FilterContext';
 
 export default function Accounts() {
   const location = useLocation();
@@ -14,7 +15,11 @@ export default function Accounts() {
   const [editAccount, setEditAccount] = useState<Account | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Account | null>(null);
   const [showImport, setShowImport] = useState(false);
-  const [search, setSearch] = useState('');
+
+  // Persistent filter state (sessionStorage-backed via FilterContext).
+  const { filters, updateAccountsFilters } = useFilters();
+  const search = filters.accounts.search;
+  const setSearch = (next: string) => updateAccountsFilters({ search: next });
 
   const load = useCallback(async () => {
     const data = await window.api.getAccounts();

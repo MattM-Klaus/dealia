@@ -1,4 +1,9 @@
 import React, { useEffect, useState } from 'react';
+import {
+  useFilters,
+  type CommissionReconSortColumn as SortColumn,
+  type CommissionReconSortDirection as SortDirection,
+} from '../contexts/FilterContext';
 
 interface ReconciliationResult {
   opportunity_number: string;
@@ -10,24 +15,33 @@ interface ReconciliationResult {
   account_name: string;
   ae_name: string;
   close_date: string;
+  tableau_close_date: string | null;
+  xactly_close_date: string | null;
   product_book: string;
   investigation_status: string | null;
 }
 
-type SortColumn = 'opp_number' | 'account_name' | 'ae_name' | 'close_date' | 'issue_type' | 'tableau_amount' | 'xactly_amount' | 'variance';
-type SortDirection = 'asc' | 'desc';
-
 export default function CommissionReconciliation() {
   const [periods, setPeriods] = useState<string[]>([]);
-  const [selectedPeriod, setSelectedPeriod] = useState('');
   const [newPeriod, setNewPeriod] = useState('');
   const [showNewPeriod, setShowNewPeriod] = useState(false);
   const [results, setResults] = useState<ReconciliationResult[]>([]);
   const [loading, setLoading] = useState(false);
-  const [sortColumn, setSortColumn] = useState<SortColumn>('opp_number');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
-  const [filterIssueTypes, setFilterIssueTypes] = useState<Set<string>>(new Set(['match', 'arr_mismatch', 'missing_in_xactly']));
-  const [filterInvestigations, setFilterInvestigations] = useState<Set<string>>(new Set(['not_investigated', 'Send to Commish Team', 'Xactly Correct - Renewal', 'Xactly Correct - OTD', 'Xactly Correct - Other']));
+
+  // Persistent filter state (sessionStorage-backed via FilterContext).
+  const { filters, updateCommissionReconciliationFilters } = useFilters();
+  const { selectedPeriod, sortColumn, sortDirection, filterIssueTypes, filterInvestigations } =
+    filters.commissionReconciliation;
+  const setSelectedPeriod = (next: string) =>
+    updateCommissionReconciliationFilters({ selectedPeriod: next });
+  const setSortColumn = (next: SortColumn) =>
+    updateCommissionReconciliationFilters({ sortColumn: next });
+  const setSortDirection = (next: SortDirection) =>
+    updateCommissionReconciliationFilters({ sortDirection: next });
+  const setFilterIssueTypes = (next: Set<string>) =>
+    updateCommissionReconciliationFilters({ filterIssueTypes: next });
+  const setFilterInvestigations = (next: Set<string>) =>
+    updateCommissionReconciliationFilters({ filterInvestigations: next });
 
   const [uploadStatus, setUploadStatus] = useState<{
     tableau?: { inserted: number; updated: number };
@@ -43,8 +57,14 @@ export default function CommissionReconciliation() {
     const data = await window.api.getCommissionPeriods();
     setPeriods(data);
     if (data.length > 0) {
-      setSelectedPeriod(data[0]);
-      loadReconciliation(data[0]);
+      // Honor a previously-selected period (persisted via FilterContext) if it
+      // still exists in the period list; otherwise fall back to the most recent.
+      const persisted = filters.commissionReconciliation.selectedPeriod;
+      const target = persisted && data.includes(persisted) ? persisted : data[0];
+      if (target !== persisted) {
+        setSelectedPeriod(target);
+      }
+      loadReconciliation(target);
     }
   }
 

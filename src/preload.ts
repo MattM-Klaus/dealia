@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { AccountFormData, AisForecast, AppSettings, AnalyticsData, Quota } from './shared/types';
+import type { AccountFormData, AisForecast, AppSettings, AnalyticsData, Quota, ForecastOpp } from './shared/types';
 
 
 contextBridge.exposeInMainWorld('api', {

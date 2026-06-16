@@ -161,10 +161,12 @@ export default function Settings() {
 
     const result = await window.api.syncFromTableau();
 
-    if (result.success && result.result) {
+    if (result.success) {
+      const inserted = result.inserted || 0;
+      const updated = result.updated || 0;
       setTableauTestResult({
         success: true,
-        message: `✓ Connection successful! Found ${result.result.inserted + result.result.updated} opportunities.`
+        message: `✓ Connection successful! Found ${inserted + updated} opportunities.`
       });
     } else {
       setTableauTestResult({

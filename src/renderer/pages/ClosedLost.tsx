@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import type { ClosedWonOpp } from '../../shared/types';
 import { toCloseQuarter } from '../../shared/utils';
+import { useFilters } from '../contexts/FilterContext';
 
 const PRODUCT_COLORS: Record<string, string> = {
   'ai agents': 'bg-purple-50 text-purple-700',
@@ -43,12 +44,9 @@ export default function ClosedLost() {
   const [closedLost, setClosedLost] = useState<ClosedWonOpp[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Filters
-  const [searchQuery, setSearchQuery] = useState('');
-  const [managerFilter, setManagerFilter] = useState('');
-  const [quarterFilter, setQuarterFilter] = useState(toCloseQuarter(new Date().toISOString().split('T')[0]));
-  const [monthFilter, setMonthFilter] = useState('');
-  const [aiAeFilter, setAiAeFilter] = useState('');
+  // Filters from context (persist across navigation via sessionStorage)
+  const { filters, updateClosedLostFilters } = useFilters();
+  const { searchQuery, managerFilter, quarterFilter, monthFilter, aiAeFilter } = filters.closedLost;
 
   const load = useCallback(async () => {
     const cl = await window.api.getClosedLostOpps();
@@ -105,13 +103,13 @@ export default function ClosedLost() {
         <input
           type="text"
           value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
+          onChange={(e) => updateClosedLostFilters({ searchQuery: e.target.value })}
           placeholder="Search by account name…"
           className="w-full text-sm border border-gray-200 rounded-xl pl-9 pr-4 py-2.5 outline-none focus:ring-2 focus:ring-red-400 bg-white placeholder-gray-300"
         />
         {searchQuery && (
           <button
-            onClick={() => setSearchQuery('')}
+            onClick={() => updateClosedLostFilters({ searchQuery: '' })}
             className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm"
           >
             ✕
@@ -121,13 +119,13 @@ export default function ClosedLost() {
 
       {/* Filters */}
       <div className="flex gap-2 mb-3 flex-wrap items-center">
-        <FilterSelect value={managerFilter} onChange={setManagerFilter} options={allManagers} placeholder="All Managers" />
-        <FilterSelect value={quarterFilter} onChange={setQuarterFilter} options={allQuarters} placeholder="All Quarters" />
-        <FilterSelect value={monthFilter} onChange={setMonthFilter} options={allMonths} placeholder="All Months" />
-        <FilterSelect value={aiAeFilter} onChange={setAiAeFilter} options={allAiAes} placeholder="All AI AEs" />
+        <FilterSelect value={managerFilter} onChange={(v) => updateClosedLostFilters({ managerFilter: v })} options={allManagers} placeholder="All Managers" />
+        <FilterSelect value={quarterFilter} onChange={(v) => updateClosedLostFilters({ quarterFilter: v })} options={allQuarters} placeholder="All Quarters" />
+        <FilterSelect value={monthFilter} onChange={(v) => updateClosedLostFilters({ monthFilter: v })} options={allMonths} placeholder="All Months" />
+        <FilterSelect value={aiAeFilter} onChange={(v) => updateClosedLostFilters({ aiAeFilter: v })} options={allAiAes} placeholder="All AI AEs" />
         {(searchQuery || managerFilter || quarterFilter || monthFilter || aiAeFilter) && (
           <button
-            onClick={() => { setSearchQuery(''); setManagerFilter(''); setQuarterFilter(''); setMonthFilter(''); setAiAeFilter(''); }}
+            onClick={() => updateClosedLostFilters({ searchQuery: '', managerFilter: '', quarterFilter: '', monthFilter: '', aiAeFilter: '' })}
             className="text-xs text-gray-400 hover:text-gray-600 px-2"
           >
             Clear filters

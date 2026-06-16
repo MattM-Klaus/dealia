@@ -103,7 +103,7 @@ export function getQuarterWeeks(quarter: string): Array<{ start: Date; end: Date
 
   // Determine quarter start and end dates
   let qStart: Date, qEnd: Date;
-  const calendarYear = q === 4 ? fiscalYear : fiscalYear - 1;
+  const calendarYear = fiscalYear - 1;
 
   if (q === 1) {
     qStart = new Date(calendarYear, 1, 1); // Feb 1
@@ -120,7 +120,7 @@ export function getQuarterWeeks(quarter: string): Array<{ start: Date; end: Date
   }
 
   const weeks: Array<{ start: Date; end: Date; label: string }> = [];
-  let current = getWeekStart(qStart);
+  const current = getWeekStart(qStart);
 
   while (current <= qEnd) {
     const weekEnd = new Date(current);

@@ -55,7 +55,7 @@ function periodMatchesDate(period: string, dateStr: string): boolean {
   const monthMap: { [key: string]: number } = {
     'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4, 'May': 5, 'Jun': 6,
     'Jul': 7, 'Aug': 8, 'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12,
-    'January': 1, 'February': 2, 'March': 3, 'April': 4, 'May': 5, 'June': 6,
+    'January': 1, 'February': 2, 'March': 3, 'April': 4, 'June': 6,
     'July': 7, 'August': 8, 'September': 9, 'October': 10, 'November': 11, 'December': 12,
   };
 
@@ -98,7 +98,7 @@ export async function importXactlyCSV(filePath: string, period: string): Promise
           reject(error);
         }
       },
-      error: (error) => {
+      error: (error: unknown) => {
         reject(error);
       },
     });
@@ -135,8 +135,10 @@ export async function importTableauCSV(filePath: string, period: string): Promis
           const cleanRow = (row: any): TableauRow | null => {
             const cleanedRow: any = {};
             for (const key in row) {
-              const cleanKey = key.replace(/\x00/g, '');
-              const cleanValue = typeof row[key] === 'string' ? row[key].replace(/\x00/g, '') : row[key];
+              // eslint-disable-next-line no-control-regex
+              const cleanKey = key.replace(/\u0000/g, '');
+              // eslint-disable-next-line no-control-regex
+              const cleanValue = typeof row[key] === 'string' ? row[key].replace(/\u0000/g, '') : row[key];
               cleanedRow[cleanKey] = cleanValue;
             }
             return cleanedRow as TableauRow;
@@ -171,7 +173,7 @@ export async function importTableauCSV(filePath: string, period: string): Promis
           reject(error);
         }
       },
-      error: (error) => {
+      error: (error: unknown) => {
         console.error('[importTableauCSV] Parse error:', error);
         reject(error);
       },

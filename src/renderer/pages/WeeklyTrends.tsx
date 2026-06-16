@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import type { ForecastOpp, ClosedWonOpp, ForecastChange } from '../../shared/types';
 import { toCloseQuarter, getQuarterWeeks, formatWeekRange, calculateWeightedPipe } from '../../shared/utils';
+import { useFilters, type WeeklyTrendsVisibleLines } from '../contexts/FilterContext';
 
 // Print styles for PDF export
 const printStyles = `
@@ -168,40 +169,43 @@ export default function WeeklyTrends() {
 
   // Week selection state
   const currentQuarter = toCloseQuarter(new Date().toISOString().split('T')[0]);
-  const weeks = React.useMemo(() => getQuarterWeeks(currentQuarter), [currentQuarter]);
+  const weeks = React.useMemo(() =>
+    getQuarterWeeks(currentQuarter).map(w => ({
+      ...w,
+      weekStart: w.start,
+      weekEnd: w.end
+    })),
+    [currentQuarter]
+  );
   const currentWeekIndex = weeks.findIndex((w) => {
     const now = new Date();
     return now >= w.start && now <= w.end;
   });
-  // Use lazy initializer to find current week at component mount
-  const [selectedWeekIndex, setSelectedWeekIndex] = useState(() => {
-    const now = new Date();
-    const weeksArr = getQuarterWeeks(currentQuarter);
-    const idx = weeksArr.findIndex((w) => now >= w.start && now <= w.end);
-    return idx >= 0 ? idx : 0;
-  });
 
-  // Region filter state
-  const [selectedRegion, setSelectedRegion] = useState<'All' | 'NA' | 'LATAM'>('NA');
+  // Persistent filter state (sessionStorage-backed via FilterContext).
+  // selectedWeekIndex is null on first session so we can fall back to the
+  // current week even after a quarter rolls over; once the user picks a
+  // week we persist the resolved numeric index.
+  const { filters, updateWeeklyTrendsFilters } = useFilters();
+  const {
+    selectedWeekIndex: storedWeekIndex,
+    selectedRegion,
+    selectedManagers,
+    visibleLines,
+  } = filters.weeklyTrends;
+  const selectedWeekIndex =
+    storedWeekIndex !== null ? storedWeekIndex : currentWeekIndex >= 0 ? currentWeekIndex : 0;
+  const setSelectedWeekIndex = (next: number) =>
+    updateWeeklyTrendsFilters({ selectedWeekIndex: next });
+  const setSelectedRegion = (next: 'All' | 'NA' | 'LATAM') =>
+    updateWeeklyTrendsFilters({ selectedRegion: next });
+  const setSelectedManagers = (next: Set<string>) =>
+    updateWeeklyTrendsFilters({ selectedManagers: next });
+  const setVisibleLines = (next: typeof visibleLines) =>
+    updateWeeklyTrendsFilters({ visibleLines: next });
 
-  // Manager filter state (multi-select)
-  const [selectedManagers, setSelectedManagers] = useState<Set<string>>(new Set());
+  // Manager dropdown open/close stays local — it's transient UI, not a filter.
   const [showManagerDropdown, setShowManagerDropdown] = useState(false);
-
-  // Chart toggle state
-  const [visibleLines, setVisibleLines] = useState({
-    vpPipeline: false,
-    vpDealBacked: true,
-    vpCommit: false,
-    vpML: false,
-    vpBestCase: false,
-    aisDealBacked: false,
-    aisCommit: false,
-    aisML: false,
-    aisBestCase: false,
-    weightedPipe: false,
-    closedWon: true,
-  });
 
   // Print mode state
   const [preparingPrint, setPreparingPrint] = useState(false);
@@ -211,7 +215,7 @@ export default function WeeklyTrends() {
       window.api.getForecastOpps(),
       window.api.getClosedWonOpps(),
       window.api.getAnalyticsData().then((d) => d?.changes || []),
-      window.api.getPipelineSnapshots?.() || Promise.resolve([]),
+      window.api.getPipelineSnapshots(),
       window.api.getExcludedDealIds(),
     ]);
     setOpps(o);
@@ -399,8 +403,8 @@ export default function WeeklyTrends() {
   const quarterFilteredOpps = opps.filter((o) => toCloseQuarter(o.close_date) === currentQuarter);
 
   // Then apply region filter
-  let regionFilteredOpps = selectedRegion === 'All' ? quarterFilteredOpps : quarterFilteredOpps.filter((o) => o.region === selectedRegion);
-  let regionFilteredClosedWon = selectedRegion === 'All' ? closedWon : closedWon.filter((o) => o.region === selectedRegion);
+  const regionFilteredOpps = selectedRegion === 'All' ? quarterFilteredOpps : quarterFilteredOpps.filter((o) => o.region === selectedRegion);
+  const regionFilteredClosedWon = selectedRegion === 'All' ? closedWon : closedWon.filter((o) => o.region === selectedRegion);
 
   // Then apply manager filter (if any managers selected)
   const filteredOpps = selectedManagers.size > 0
@@ -722,19 +726,19 @@ export default function WeeklyTrends() {
               <MetricCard
                 label="Pipeline"
                 value={fmtDollar(selectedWeek.vpPipeline)}
-                delta={previousWeek && fmtDelta(selectedWeek.vpPipeline, previousWeek.vpPipeline)}
+                delta={previousWeek ? fmtDelta(selectedWeek.vpPipeline, previousWeek.vpPipeline) : undefined}
                 subtitle={`${weeks.length} weeks`}
               />
               <MetricCard
                 label="Deal Backed"
                 value={fmtDollar(selectedWeek.vpDealBacked)}
-                delta={previousWeek && fmtDelta(selectedWeek.vpDealBacked, previousWeek.vpDealBacked)}
+                delta={previousWeek ? fmtDelta(selectedWeek.vpDealBacked, previousWeek.vpDealBacked) : undefined}
                 subtitle="CW + Commit + ML"
               />
               <MetricCard
                 label="Weighted Pipe"
                 value={fmtDollar(selectedWeek.weightedPipe)}
-                delta={previousWeek && fmtDelta(selectedWeek.weightedPipe, previousWeek.weightedPipe)}
+                delta={previousWeek ? fmtDelta(selectedWeek.weightedPipe, previousWeek.weightedPipe) : undefined}
                 subtitle="CW + Stage Win Rates"
               />
               <MetricCard
@@ -755,11 +759,11 @@ export default function WeeklyTrends() {
                 label="Big Deals"
                 value={String(selectedWeek.bigDealsCount)}
                 delta={
-                  previousWeek && {
+                  previousWeek ? {
                     text: `${selectedWeek.bigDealsCount - previousWeek.bigDealsCount >= 0 ? '+' : ''}${selectedWeek.bigDealsCount - previousWeek.bigDealsCount}`,
                     arrow: selectedWeek.bigDealsCount > previousWeek.bigDealsCount ? '↑' : selectedWeek.bigDealsCount < previousWeek.bigDealsCount ? '↓' : '→',
                     color: selectedWeek.bigDealsCount > previousWeek.bigDealsCount ? 'text-emerald-600' : selectedWeek.bigDealsCount < previousWeek.bigDealsCount ? 'text-red-600' : 'text-gray-500',
-                  }
+                  } : undefined
                 }
                 subtitle=">$100K opps"
               />
@@ -773,19 +777,19 @@ export default function WeeklyTrends() {
               <MetricCard
                 label="Pipeline"
                 value={fmtDollar(selectedWeek.aisPipeline)}
-                delta={previousWeek && fmtDelta(selectedWeek.aisPipeline, previousWeek.aisPipeline)}
+                delta={previousWeek ? fmtDelta(selectedWeek.aisPipeline, previousWeek.aisPipeline) : undefined}
                 subtitle={`${weeks.length} weeks`}
               />
               <MetricCard
                 label="Deal Backed"
                 value={fmtDollar(selectedWeek.aisDealBacked)}
-                delta={previousWeek && fmtDelta(selectedWeek.aisDealBacked, previousWeek.aisDealBacked)}
+                delta={previousWeek ? fmtDelta(selectedWeek.aisDealBacked, previousWeek.aisDealBacked) : undefined}
                 subtitle="CW + Commit + ML"
               />
               <MetricCard
                 label="Weighted Pipe"
                 value={fmtDollar(selectedWeek.weightedPipe)}
-                delta={previousWeek && fmtDelta(selectedWeek.weightedPipe, previousWeek.weightedPipe)}
+                delta={previousWeek ? fmtDelta(selectedWeek.weightedPipe, previousWeek.weightedPipe) : undefined}
                 subtitle="CW + Stage Win Rates"
               />
               <MetricCard
@@ -806,11 +810,11 @@ export default function WeeklyTrends() {
                 label="Big Deals"
                 value={String(selectedWeek.bigDealsCount)}
                 delta={
-                  previousWeek && {
+                  previousWeek ? {
                     text: `${selectedWeek.bigDealsCount - previousWeek.bigDealsCount >= 0 ? '+' : ''}${selectedWeek.bigDealsCount - previousWeek.bigDealsCount}`,
                     arrow: selectedWeek.bigDealsCount > previousWeek.bigDealsCount ? '↑' : selectedWeek.bigDealsCount < previousWeek.bigDealsCount ? '↓' : '→',
                     color: selectedWeek.bigDealsCount > previousWeek.bigDealsCount ? 'text-emerald-600' : selectedWeek.bigDealsCount < previousWeek.bigDealsCount ? 'text-red-600' : 'text-gray-500',
-                  }
+                  } : undefined
                 }
                 subtitle=">$100K opps"
               />
@@ -875,22 +879,21 @@ export default function WeeklyTrends() {
         } else {
           const snapshot = snapshots.filter((s) => s.date <= selectedWeekStartStr).sort((a, b) => b.date.localeCompare(a.date))[0];
           const snapshotData = snapshot?.data || [];
-          let quarterFiltered = snapshotData.filter((o) => toCloseQuarter(o.close_date) === currentQuarter);
+          const quarterFiltered = snapshotData.filter((o) => toCloseQuarter(o.close_date) === currentQuarter);
           // Apply region filter
-          let regionFiltered = selectedRegion === 'All' ? quarterFiltered : quarterFiltered.filter((o) => o.region === selectedRegion);
+          const regionFiltered = selectedRegion === 'All' ? quarterFiltered : quarterFiltered.filter((o) => o.region === selectedRegion);
           // Apply manager filter if any selected
           currentWeekOpps = selectedManagers.size > 0 ? regionFiltered.filter((o) => selectedManagers.has(o.manager_name)) : regionFiltered;
         }
 
         // Get previous week opps (use snapshot from START of previous week for Monday-to-Monday comparison)
-        let previousWeekOpps: ForecastOpp[];
         const snapshot = snapshots.filter((s) => s.date <= previousWeekStartStr).sort((a, b) => b.date.localeCompare(a.date))[0];
         const snapshotData = snapshot?.data || [];
-        let quarterFiltered = snapshotData.filter((o) => toCloseQuarter(o.close_date) === currentQuarter);
+        const quarterFiltered = snapshotData.filter((o) => toCloseQuarter(o.close_date) === currentQuarter);
         // Apply region filter
-        let regionFiltered = selectedRegion === 'All' ? quarterFiltered : quarterFiltered.filter((o) => o.region === selectedRegion);
+        const regionFiltered = selectedRegion === 'All' ? quarterFiltered : quarterFiltered.filter((o) => o.region === selectedRegion);
         // Apply manager filter if any selected
-        previousWeekOpps = selectedManagers.size > 0 ? regionFiltered.filter((o) => selectedManagers.has(o.manager_name)) : regionFiltered;
+        const previousWeekOpps: ForecastOpp[] = selectedManagers.size > 0 ? regionFiltered.filter((o) => selectedManagers.has(o.manager_name)) : regionFiltered;
 
         // Get closed won this week
         const closedWonThisWeekFiltered = filteredClosedWon.filter((o) => {
@@ -996,7 +999,7 @@ function TrendChart({
   selectedIndex,
 }: {
   weeklyData: WeekData[];
-  visibleLines: Record<string, boolean>;
+  visibleLines: WeeklyTrendsVisibleLines;
   selectedIndex: number;
 }) {
   const [hoveredPoint, setHoveredPoint] = React.useState<{ x: number; y: number; label: string; value: string } | null>(null);
@@ -1405,10 +1408,11 @@ function MovementBreakdown({
   setWeeklyNotesNA: (notes: string) => void;
   setWeeklyNotesLATAM: (notes: string) => void;
 }) {
-  const [expandedSection, setExpandedSection] = React.useState<string | null>(null);
+  const { filters: filterCtx, updateWeeklyTrendsFilters } = useFilters();
+  const expandedSection = filterCtx.weeklyTrends.expandedSection;
 
   const toggleSection = (section: string) => {
-    setExpandedSection(expandedSection === section ? null : section);
+    updateWeeklyTrendsFilters({ expandedSection: expandedSection === section ? null : section });
   };
 
   const exportDealBackedHtml = () => {

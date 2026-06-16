@@ -1,0 +1,84 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Main gradient for background -->
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#3B82F6;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#10B981;stop-opacity:1" />
+    </linearGradient>
+
+    <!-- Subtle overlay gradient -->
+    <linearGradient id="overlayGradient" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff;stop-opacity:0.2" />
+      <stop offset="100%" style="stop-color:#000000;stop-opacity:0.1" />
+    </linearGradient>
+
+    <!-- Light gradient for funnel -->
+    <linearGradient id="funnelGradient" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff;stop-opacity:0.9" />
+      <stop offset="100%" style="stop-color:#ffffff;stop-opacity:0.6" />
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded square background with gradient -->
+  <rect x="0" y="0" width="1024" height="1024" rx="220" fill="url(#bgGradient)"/>
+  <rect x="0" y="0" width="1024" height="1024" rx="220" fill="url(#overlayGradient)"/>
+
+  <!-- Sales Pipeline Funnel -->
+  <g transform="translate(512, 512)">
+    <!-- Top section of funnel (wide) -->
+    <path d="M -180 -280 L 180 -280 L 140 -120 L -140 -120 Z"
+          fill="url(#funnelGradient)"
+          opacity="0.3"
+          stroke="white"
+          stroke-width="4"/>
+
+    <!-- Middle section -->
+    <path d="M -140 -120 L 140 -120 L 100 40 L -100 40 Z"
+          fill="url(#funnelGradient)"
+          opacity="0.5"
+          stroke="white"
+          stroke-width="4"/>
+
+    <!-- Bottom section (narrow) -->
+    <path d="M -100 40 L 100 40 L 70 180 L -70 180 Z"
+          fill="url(#funnelGradient)"
+          opacity="0.8"
+          stroke="white"
+          stroke-width="4"/>
+
+    <!-- Deal/coin at bottom -->
+    <circle cx="0" cy="240" r="45" fill="white" opacity="0.95"/>
+    <text x="0" y="260"
+          font-family="-apple-system, BlinkMacSystemFont, sans-serif"
+          font-size="50"
+          font-weight="700"
+          fill="url(#bgGradient)"
+          text-anchor="middle">$</text>
+
+    <!-- Rising arrow/growth indicator -->
+    <g transform="translate(200, -50)">
+      <!-- Arrow line -->
+      <path d="M 0 180 L 40 60 L 80 100"
+            stroke="white"
+            stroke-width="24"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            fill="none"
+            opacity="0.9"/>
+
+      <!-- Arrow head -->
+      <path d="M 10 60 L 40 60 L 40 30"
+            stroke="white"
+            stroke-width="24"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            fill="none"
+            opacity="0.9"/>
+
+      <!-- Data points on arrow -->
+      <circle cx="0" cy="180" r="16" fill="white" opacity="0.9"/>
+      <circle cx="40" cy="60" r="16" fill="white" opacity="0.9"/>
+      <circle cx="80" cy="100" r="16" fill="white" opacity="0.9"/>
+    </g>
+  </g>
+</svg>

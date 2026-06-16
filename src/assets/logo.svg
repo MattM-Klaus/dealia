@@ -1,0 +1,27 @@
+<svg width="140" height="36" viewBox="0 0 140 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Modern pipeline/funnel with growth arrow -->
+  <defs>
+    <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#3B82F6;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#10B981;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Stylized funnel/pipeline icon -->
+  <g transform="translate(2, 4)">
+    <!-- Funnel shape -->
+    <path d="M4 4 L20 4 L16 14 L8 14 Z" fill="url(#logoGradient)" opacity="0.2"/>
+    <path d="M8 14 L16 14 L14 22 L10 22 Z" fill="url(#logoGradient)" opacity="0.4"/>
+    <path d="M10 22 L14 22 L13 28 L11 28 Z" fill="url(#logoGradient)"/>
+
+    <!-- Rising arrow -->
+    <path d="M18 26 L22 18 L26 22" stroke="#10B981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <circle cx="22" cy="18" r="2" fill="#10B981"/>
+  </g>
+
+  <!-- Text "Dealia" -->
+  <text x="42" y="24" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif" font-size="20" font-weight="700" fill="#1F2937" letter-spacing="-0.5">Dealia</text>
+
+  <!-- Accent dot -->
+  <circle cx="114" cy="23" r="2.5" fill="url(#logoGradient)"/>
+</svg>
